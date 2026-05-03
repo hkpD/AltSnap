@@ -52,8 +52,8 @@ jobs:
           which gcc
           gcc -dumpmachine
           gcc --version
-          which windres || true
-          windres --version || true
+          which windres
+          windres --version
 
       - name: Patch Makefile for x64
         if: matrix.arch == 'x64'
@@ -63,19 +63,21 @@ jobs:
           cd "$GITHUB_WORKSPACE"
 
           echo "=== Makefile architecture flags before patch ==="
-          grep -n -- "-m32\|-m64\|pe-i386\|pe-x86-64" Makefile || true
+          grep -nE -- "-m32|-m64|-march=|-mtune=|-mpreferred-stack-boundary|-mno-stack-arg-probe|-e_|-eDllMain|-eunfuckWinMain|pe-i386|pe-x86-64" Makefile || true
 
-          # AltSnap's Makefile is 32-bit oriented and hardcodes -m32.
-          # In the MINGW64 environment that makes the x86_64 compiler try
-          # to link a 32-bit program against 64-bit import libs, causing:
-          # "skipping incompatible ... libadvapi32.a".
           sed -i \
             -e 's/-m32/-m64/g' \
+            -e 's/-march=i386//g' \
+            -e 's/-mtune=i686//g' \
+            -e 's/-mpreferred-stack-boundary=2//g' \
+            -e 's/-mno-stack-arg-probe//g' \
+            -e 's/-e_DllMain@12/-eDllMain/g' \
+            -e 's/-e_unfuckWinMain@0/-eunfuckWinMain/g' \
             -e 's/pe-i386/pe-x86-64/g' \
             Makefile
 
           echo "=== Makefile architecture flags after patch ==="
-          grep -n -- "-m32\|-m64\|pe-i386\|pe-x86-64" Makefile || true
+          grep -nE -- "-m32|-m64|-march=|-mtune=|-mpreferred-stack-boundary|-mno-stack-arg-probe|-e_|-eDllMain|-eunfuckWinMain|pe-i386|pe-x86-64" Makefile || true
 
       - name: Build with MinGW
         shell: msys2 {0}
@@ -119,11 +121,13 @@ jobs:
           $artifactDir = "AltSnap-${{ matrix.arch }}"
           New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
 
+          $artifactFullPath = (Resolve-Path $artifactDir).Path
+
           $files = Get-ChildItem -Recurse -Include *.exe,*.dll | Where-Object {
             $_.DirectoryName -notmatch '\\.git' -and
             $_.DirectoryName -notmatch 'msys64' -and
             $_.DirectoryName -notmatch '_temp' -and
-            $_.DirectoryName -notmatch [regex]::Escape((Resolve-Path $artifactDir).Path)
+            $_.DirectoryName -ne $artifactFullPath
           }
 
           if ($files.Count -eq 0) {
