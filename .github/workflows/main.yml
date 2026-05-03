@@ -1,0 +1,120 @@
+name: Build AltSnap
+
+on:
+  push:
+    branches: [ master, main, develop ]
+  pull_request:
+    branches: [ master, main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    
+    strategy:
+      matrix:
+        arch: [x86, x64]
+        include:
+          - arch: x86
+            msvc_arch: x86
+            mingw_arch: i686
+          - arch: x64
+            msvc_arch: x64
+            mingw_arch: x86_64
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        submodules: recursive
+
+    - name: Setup MSYS2
+      uses: msys2/setup-msys2@v2
+      with:
+        msystem: MINGW${{ matrix.arch == 'x64' && '64' || '32' }}
+        update: true
+        install: >-
+          base-devel
+          mingw-w64-${{ matrix.mingw_arch }}-toolchain
+          mingw-w64-${{ matrix.mingw_arch }}-gcc
+          mingw-w64-${{ matrix.mingw_arch }}-make
+          make
+          autoconf
+          automake
+
+    - name: Build with MinGW
+      shell: msys2 {0}
+      run: |
+        cd "$GITHUB_WORKSPACE"
+        make clean
+        make ARCH=${{ matrix.arch }}
+
+    - name: List build artifacts
+      shell: pwsh
+      run: |
+        Write-Host "Build directory contents:"
+        Get-ChildItem -Recurse -Include *.exe,*.dll | ForEach-Object { Write-Host $_.FullName }
+
+    - name: Prepare artifacts
+      shell: pwsh
+      run: |
+        $artifactDir = "AltSnap-${{ matrix.arch }}"
+        New-Item -ItemType Directory -Force -Path $artifactDir
+        
+        # Copy executables and DLLs
+        if (Test-Path "AltSnap.exe") { Copy-Item "AltSnap.exe" $artifactDir }
+        if (Test-Path "hooks.dll") { Copy-Item "hooks.dll" $artifactDir }
+        if (Test-Path "HookWindows_${{ matrix.arch }}.dll") { 
+          Copy-Item "HookWindows_${{ matrix.arch }}.dll" $artifactDir 
+        }
+        
+        # Copy any readme/license files
+        if (Test-Path "README.md") { Copy-Item "README.md" $artifactDir }
+        if (Test-Path "LICENSE") { Copy-Item "LICENSE" $artifactDir }
+        if (Test-Path "COPYING") { Copy-Item "COPYING" $artifactDir }
+        
+        # Copy language files if they exist
+        if (Test-Path "lang") { Copy-Item "lang" $artifactDir -Recurse }
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: AltSnap-${{ matrix.arch }}
+        path: AltSnap-${{ matrix.arch }}/
+        if-no-files-found: warn
+
+  release:
+    needs: build
+    runs-on: windows-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    
+    steps:
+    - name: Download x86 artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: AltSnap-x86
+        path: release/x86
+
+    - name: Download x64 artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: AltSnap-x64
+        path: release/x64
+
+    - name: Create release archives
+      shell: pwsh
+      run: |
+        Compress-Archive -Path release/x86/* -DestinationPath AltSnap-x86.zip
+        Compress-Archive -Path release/x64/* -DestinationPath AltSnap-x64.zip
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          AltSnap-x86.zip
+          AltSnap-x64.zip
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
