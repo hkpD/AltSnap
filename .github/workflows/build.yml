@@ -18,18 +18,11 @@ jobs:
           - arch: x86
             mingw_sys: MINGW32
             mingw_arch: i686
-            make_flags: ""
           - arch: x64
             mingw_sys: MINGW64
             mingw_arch: x86_64
-            make_flags: "X64=1"
     
     steps:
-    - name: Configure Git
-      run: |
-        git config --global core.autocrlf false
-        git config --global core.eol lf
-
     - name: Checkout code
       uses: actions/checkout@v4
 
@@ -37,64 +30,68 @@ jobs:
       uses: msys2/setup-msys2@v2
       with:
         msystem: ${{ matrix.mingw_sys }}
-        update: true
         install: >-
           base-devel
           mingw-w64-${{ matrix.mingw_arch }}-toolchain
           make
 
-    - name: Build with MinGW
+    - name: Build AltSnap
       shell: msys2 {0}
       run: |
-        # Go to workspace
+        # Ensure we are in the workspace
         cd "$GITHUB_WORKSPACE"
         
-        echo "Building for ${{ matrix.arch }} using $MSYSTEM"
-        gcc -dumpmachine
-        
-        # 1. Clean any previous artifacts to prevent "skipping incompatible" errors
+        # Clean any old objects
         make clean || true
-        
-        # 2. Run the build with the specific architecture flags
-        # We pass the flags twice (as env and as arguments) to ensure the Makefile picks them up
-        export ${{ matrix.make_flags }}
-        make ${{ matrix.make_flags }} -j$(nproc) || {
-          echo "Build failed! Checking directory state..."
-          ls -R
-          exit 1
-        }
 
-    - name: Verify build outputs
+        if [ "${{ matrix.arch }}" = "x64" ]; then
+          echo "Applying x64 patches to Makefile..."
+          
+          # 1. Remove 32-bit flags
+          sed -i 's/-m32//g' Makefile
+          sed -i 's/-march=i386//g' Makefile
+          sed -i 's/-mtune=i686//g' Makefile
+          sed -i 's/-mpreferred-stack-boundary=2//g' Makefile
+          
+          # 2. Fix 64-bit Entry Points (Remove leading underscores and @nn decorations)
+          # _unfuckWinMain@0 -> unfuckWinMain
+          # _DllMain@12 -> DllMain
+          sed -i 's/_unfuckWinMain@0/unfuckWinMain/g' Makefile
+          sed -i 's/_DllMain@12/DllMain/g' Makefile
+          
+          # 3. Ensure -m64 is used
+          echo "Building with X64=1..."
+          make X64=1 -j$(nproc)
+        else
+          echo "Building for x86..."
+          make -j$(nproc)
+        fi
+
+    - name: Verify Architecture
       shell: msys2 {0}
       run: |
-        echo "=== Checking architecture of generated binaries ==="
-        # This confirms if we actually built 64-bit or 32-bit
-        find . -maxdepth 2 -type f \( -name "*.exe" -o -name "*.dll" \) | while read file; do
-          echo "File: $file"
-          file "$file"
-        done
+        echo "Verifying binary types:"
+        find . -maxdepth 1 -type f \( -name "*.exe" -o -name "*.dll" \) -exec file {} \;
 
     - name: Package artifacts
       shell: pwsh
       run: |
-        $artifactDir = "AltSnap-${{ matrix.arch }}"
-        New-Item -ItemType Directory -Force -Path $artifactDir
+        $dir = "AltSnap-${{ matrix.arch }}"
+        New-Item -ItemType Directory -Force -Path $dir
         
-        # Copy binaries from the root (where AltSnap typically builds them)
-        $binaries = Get-ChildItem -Path "." -Include *.exe,*.dll
-        foreach ($file in $binaries) {
-            Copy-Item $file.FullName -Destination $artifactDir -Force
-        }
+        # Copy binaries
+        Get-ChildItem -Path "." -Include *.exe,*.dll | Copy-Item -Destination $dir -Force
         
-        # Copy required folders and docs
-        if (Test-Path "Lang") { Copy-Item "Lang" -Destination $artifactDir -Recurse -Force }
+        # Copy Assets
+        if (Test-Path "Lang") { Copy-Item "Lang" -Destination $dir -Recurse -Force }
         @("README.md", "LICENSE", "COPYING", "AltSnap.ini") | ForEach-Object {
-            if (Test-Path $_) { Copy-Item $_ -Destination $artifactDir -Force }
+          if (Test-Path $_) { Copy-Item $_ -Destination $dir -Force }
         }
         
-        if ((Get-ChildItem $artifactDir).Count -eq 0) {
-            Write-Error "No files were copied to the artifact directory!"
-            exit 1
+        # Simple check to ensure we actually built something
+        if ((Get-ChildItem $dir/*.exe).Count -eq 0) { 
+          Write-Error "Build failed to produce .exe files"
+          exit 1 
         }
 
     - name: Upload artifacts
@@ -107,22 +104,18 @@ jobs:
     needs: build
     runs-on: windows-latest
     if: startsWith(github.ref, 'refs/tags/')
-    
     steps:
     - name: Download artifacts
       uses: actions/download-artifact@v4
       with:
         pattern: AltSnap-*
         path: artifacts
-
     - name: Create release archives
       shell: pwsh
       run: |
         Get-ChildItem artifacts -Directory | ForEach-Object {
-          $zipName = "$($_.Name).zip"
-          Compress-Archive -Path "$($_.FullName)/*" -DestinationPath $zipName -Force
+          Compress-Archive -Path "$($_.FullName)/*" -DestinationPath "$($_.Name).zip" -Force
         }
-
     - name: Create Release
       uses: softprops/action-gh-release@v1
       with:
