@@ -18,16 +18,17 @@ jobs:
           - arch: x86
             msvc_arch: x86
             mingw_arch: i686
+            mingw_prefix: mingw32
           - arch: x64
             msvc_arch: x64
             mingw_arch: x86_64
+            mingw_prefix: mingw64
     
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
       with:
         fetch-depth: 0
-        submodules: recursive
 
     - name: Setup MSYS2
       uses: msys2/setup-msys2@v2
@@ -38,23 +39,39 @@ jobs:
           base-devel
           mingw-w64-${{ matrix.mingw_arch }}-toolchain
           mingw-w64-${{ matrix.mingw_arch }}-gcc
-          mingw-w64-${{ matrix.mingw_arch }}-make
           make
-          autoconf
-          automake
 
     - name: Build with MinGW
       shell: msys2 {0}
       run: |
         cd "$GITHUB_WORKSPACE"
-        make clean
-        make ARCH=${{ matrix.arch }}
+        
+        # Check if Makefile exists and show build info
+        ls -la
+        
+        # Try to build - adjust based on actual build system
+        if [ -f "Makefile" ]; then
+          make clean || true
+          make -j$(nproc) || make
+        elif [ -f "build.sh" ]; then
+          bash build.sh
+        elif [ -f "buildgcc.bat" ]; then
+          cmd //c buildgcc.bat ${{ matrix.arch }}
+        else
+          # Manual compilation if no build script found
+          echo "Looking for source files..."
+          find . -name "*.c" -o -name "*.cpp"
+          
+          # Attempt manual build
+          gcc -o AltSnap.exe *.c -lgdi32 -luser32 -lkernel32 || \
+          g++ -o AltSnap.exe *.cpp -lgdi32 -luser32 -lkernel32
+        fi
 
     - name: List build artifacts
-      shell: pwsh
+      shell: msys2 {0}
       run: |
-        Write-Host "Build directory contents:"
-        Get-ChildItem -Recurse -Include *.exe,*.dll | ForEach-Object { Write-Host $_.FullName }
+        echo "Build directory contents:"
+        find . -type f \( -name "*.exe" -o -name "*.dll" \) -ls
 
     - name: Prepare artifacts
       shell: pwsh
@@ -62,20 +79,27 @@ jobs:
         $artifactDir = "AltSnap-${{ matrix.arch }}"
         New-Item -ItemType Directory -Force -Path $artifactDir
         
-        # Copy executables and DLLs
-        if (Test-Path "AltSnap.exe") { Copy-Item "AltSnap.exe" $artifactDir }
-        if (Test-Path "hooks.dll") { Copy-Item "hooks.dll" $artifactDir }
-        if (Test-Path "HookWindows_${{ matrix.arch }}.dll") { 
-          Copy-Item "HookWindows_${{ matrix.arch }}.dll" $artifactDir 
+        # Find and copy executables and DLLs
+        Get-ChildItem -Recurse -Include *.exe,*.dll | Where-Object { 
+          $_.DirectoryName -notlike "*\.git*" 
+        } | ForEach-Object {
+          Write-Host "Found: $($_.FullName)"
+          Copy-Item $_.FullName $artifactDir -Force
         }
         
-        # Copy any readme/license files
-        if (Test-Path "README.md") { Copy-Item "README.md" $artifactDir }
-        if (Test-Path "LICENSE") { Copy-Item "LICENSE" $artifactDir }
-        if (Test-Path "COPYING") { Copy-Item "COPYING" $artifactDir }
+        # Copy documentation
+        @("README.md", "LICENSE", "COPYING", "readme.txt") | ForEach-Object {
+          if (Test-Path $_) { Copy-Item $_ $artifactDir -Force }
+        }
         
         # Copy language files if they exist
-        if (Test-Path "lang") { Copy-Item "lang" $artifactDir -Recurse }
+        if (Test-Path "Lang") { 
+          Copy-Item "Lang" $artifactDir -Recurse -Force
+        }
+        
+        # List what we're uploading
+        Write-Host "`nArtifacts to upload:"
+        Get-ChildItem $artifactDir -Recurse
 
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
