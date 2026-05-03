@@ -16,13 +16,13 @@ jobs:
       matrix:
         include:
           - arch: x86
-            mingw_arch: i686
             mingw_sys: MINGW32
-            msystem_prefix: mingw32
+            mingw_arch: i686
+            make_target: ""
           - arch: x64
-            mingw_arch: x86_64
             mingw_sys: MINGW64
-            msystem_prefix: mingw64
+            mingw_arch: x86_64
+            make_target: "X64=1"
     
     steps:
     - name: Configure Git
@@ -42,53 +42,69 @@ jobs:
         install: >-
           base-devel
           mingw-w64-${{ matrix.mingw_arch }}-toolchain
-          mingw-w64-${{ matrix.mingw_arch }}-gcc
-          mingw-w64-${{ matrix.mingw_arch }}-binutils
           make
 
-    - name: Verify toolchain
+    - name: Check Makefile
       shell: msys2 {0}
       run: |
-        echo "=== Compiler Info ==="
-        which gcc
-        gcc --version
-        gcc -dumpmachine
-        
-        echo "=== Available libraries ==="
-        ls /${{ matrix.msystem_prefix }}/lib/*.a | head -20
-        
-        echo "=== Environment ==="
-        echo "PATH=$PATH"
-        echo "MSYSTEM=$MSYSTEM"
+        echo "=== Checking Makefile for build targets ==="
+        if [ -f Makefile ]; then
+          grep -E "^[a-zA-Z0-9_-]+:" Makefile | head -20 || true
+          echo ""
+          echo "=== Checking for X64/x64/64 references ==="
+          grep -i "x64\|64bit\|win64" Makefile || echo "No x64 references found"
+        fi
 
     - name: Build with MinGW
       shell: msys2 {0}
-      env:
-        MSYSTEM: ${{ matrix.mingw_sys }}
       run: |
         cd "$GITHUB_WORKSPACE"
         
-        echo "Current directory: $(pwd)"
         echo "Building for ${{ matrix.arch }}"
+        echo "MSYSTEM: $MSYSTEM"
+        gcc -dumpmachine
         
-        # Clean previous builds
+        # Clean
         make clean 2>/dev/null || true
         
-        # Build - the Makefile should detect the correct architecture from MSYSTEM
-        make -j$(nproc) 2>&1 | tee build.log || {
-          echo "=== Build failed, showing last 50 lines of build log ==="
-          tail -50 build.log
-          exit 1
-        }
+        # Try different build approaches
+        if [ "${{ matrix.arch }}" = "x64" ]; then
+          echo "=== Attempting x64 build ==="
+          # Try various x64 build flags that might work
+          make ${{ matrix.make_target }} -j$(nproc) 2>&1 | tee build.log && exit 0
+          make X64=1 -j$(nproc) 2>&1 | tee build.log && exit 0
+          make x64 -j$(nproc) 2>&1 | tee build.log && exit 0
+          make WIN64=1 -j$(nproc) 2>&1 | tee build.log && exit 0
+          make ARCH=x64 -j$(nproc) 2>&1 | tee build.log && exit 0
+          make -j$(nproc) 2>&1 | tee build.log || {
+            echo "Build failed, showing errors:"
+            tail -100 build.log
+            exit 1
+          }
+        else
+          echo "=== Attempting x86 build ==="
+          make -j$(nproc) 2>&1 | tee build.log || {
+            echo "Build failed, showing errors:"
+            tail -100 build.log
+            exit 1
+          }
+        fi
 
     - name: Verify build outputs
       shell: msys2 {0}
       run: |
         echo "=== Build outputs ==="
-        find . -type f \( -name "*.exe" -o -name "*.dll" \) ! -path "*/.git/*" -exec ls -lh {} \;
+        find . -type f \( -name "*.exe" -o -name "*.dll" \) ! -path "*/.git/*" ! -path "*/msys64/*" -exec ls -lh {} \;
         
-        echo "=== Checking file types ==="
-        find . -type f \( -name "*.exe" -o -name "*.dll" \) ! -path "*/.git/*" -exec file {} \;
+        echo ""
+        echo "=== Checking architecture of binaries ==="
+        find . -type f \( -name "*.exe" -o -name "*.dll" \) ! -path "*/.git/*" ! -path "*/msys64/*" | while read file; do
+          echo "File: $file"
+          file "$file"
+          # Check PE header for architecture
+          objdump -f "$file" 2>/dev/null | grep -E "architecture|file format" || true
+          echo ""
+        done
 
     - name: Package artifacts
       shell: pwsh
@@ -96,47 +112,42 @@ jobs:
         $artifactDir = "AltSnap-${{ matrix.arch }}"
         New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
         
-        # Find and copy executables and DLLs
+        # Find and copy executables and DLLs (excluding MSYS2 system files)
         $files = Get-ChildItem -Recurse -Include *.exe,*.dll | Where-Object { 
           $_.DirectoryName -notmatch '\\.git' -and 
-          $_.DirectoryName -notmatch 'msys64'
+          $_.DirectoryName -notmatch 'msys64' -and
+          $_.DirectoryName -notmatch '_temp'
         }
         
         if ($files.Count -eq 0) {
           Write-Error "No build outputs found!"
+          Get-ChildItem -Recurse | Select-Object FullName | Out-String | Write-Host
           exit 1
         }
         
         foreach ($file in $files) {
-          Write-Host "Copying: $($file.Name) from $($file.DirectoryName)"
+          Write-Host "Copying: $($file.Name)"
           Copy-Item $file.FullName -Destination $artifactDir -Force
         }
         
         # Copy documentation
         @("README.md", "LICENSE", "COPYING") | ForEach-Object {
           if (Test-Path $_) {
-            Write-Host "Copying: $_"
             Copy-Item $_ -Destination $artifactDir -Force
           }
         }
         
-        # Copy text files
         Get-ChildItem "*.txt" -ErrorAction SilentlyContinue | ForEach-Object {
-          Write-Host "Copying: $($_.Name)"
           Copy-Item $_.FullName -Destination $artifactDir -Force
         }
         
-        # Copy Lang directory if it exists
+        # Copy Lang directory
         if (Test-Path "Lang") {
-          Write-Host "Copying Lang directory"
           Copy-Item "Lang" -Destination $artifactDir -Recurse -Force
         }
         
-        # Show what we're uploading
-        Write-Host "`n=== Artifacts to upload ==="
-        Get-ChildItem $artifactDir -Recurse | ForEach-Object {
-          Write-Host $_.FullName
-        }
+        Write-Host "`n=== Final artifact contents ==="
+        Get-ChildItem $artifactDir -Recurse
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
@@ -163,19 +174,24 @@ jobs:
       with:
         pattern: AltSnap-*
         path: artifacts
-        merge-multiple: false
+
+    - name: List downloaded artifacts
+      shell: pwsh
+      run: |
+        Write-Host "Downloaded artifacts:"
+        Get-ChildItem artifacts -Recurse
 
     - name: Create release archives
       shell: pwsh
       run: |
-        Get-ChildItem artifacts -Directory | ForEach-Object {
+        Get-ChildItem artifacts -Directory | Where-Object { $_.Name -like "AltSnap-*" } | ForEach-Object {
           $zipName = "$($_.Name).zip"
-          Write-Host "Creating $zipName"
-          Compress-Archive -Path "$($_.FullName)/*" -DestinationPath $zipName
+          Write-Host "Creating $zipName from $($_.FullName)"
+          Compress-Archive -Path "$($_.FullName)/*" -DestinationPath $zipName -Force
         }
         
-        Write-Host "`nRelease files:"
-        Get-ChildItem *.zip
+        Write-Host "`nRelease archives created:"
+        Get-ChildItem *.zip | ForEach-Object { Write-Host "$($_.Name) - $($_.Length) bytes" }
 
     - name: Create Release
       uses: softprops/action-gh-release@v1
