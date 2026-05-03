@@ -18,9 +18,11 @@ jobs:
           - arch: x86
             mingw_arch: i686
             mingw_sys: MINGW32
+            msystem_prefix: mingw32
           - arch: x64
             mingw_arch: x86_64
             mingw_sys: MINGW64
+            msystem_prefix: mingw64
     
     steps:
     - name: Configure Git
@@ -41,44 +43,52 @@ jobs:
           base-devel
           mingw-w64-${{ matrix.mingw_arch }}-toolchain
           mingw-w64-${{ matrix.mingw_arch }}-gcc
+          mingw-w64-${{ matrix.mingw_arch }}-binutils
           make
-          git
 
-    - name: Show build environment
+    - name: Verify toolchain
       shell: msys2 {0}
       run: |
-        echo "Current directory:"
-        pwd
-        ls -la
-        echo "GCC version:"
+        echo "=== Compiler Info ==="
+        which gcc
         gcc --version
-        echo "Make version:"
-        make --version
+        gcc -dumpmachine
+        
+        echo "=== Available libraries ==="
+        ls /${{ matrix.msystem_prefix }}/lib/*.a | head -20
+        
+        echo "=== Environment ==="
+        echo "PATH=$PATH"
+        echo "MSYSTEM=$MSYSTEM"
 
     - name: Build with MinGW
       shell: msys2 {0}
+      env:
+        MSYSTEM: ${{ matrix.mingw_sys }}
       run: |
-        # Convert Windows paths to MSYS paths
         cd "$GITHUB_WORKSPACE"
+        
+        echo "Current directory: $(pwd)"
+        echo "Building for ${{ matrix.arch }}"
         
         # Clean previous builds
         make clean 2>/dev/null || true
         
-        # Build
-        if [ "${{ matrix.arch }}" = "x86" ]; then
-          make ARCH=Win32 -j$(nproc) || make ARCH=Win32 || make
-        else
-          make ARCH=x64 -j$(nproc) || make ARCH=x64 || make
-        fi
+        # Build - the Makefile should detect the correct architecture from MSYSTEM
+        make -j$(nproc) 2>&1 | tee build.log || {
+          echo "=== Build failed, showing last 50 lines of build log ==="
+          tail -50 build.log
+          exit 1
+        }
 
     - name: Verify build outputs
       shell: msys2 {0}
       run: |
-        echo "=== Executables and DLLs ==="
-        find . -name "*.exe" -o -name "*.dll" | grep -v ".git"
+        echo "=== Build outputs ==="
+        find . -type f \( -name "*.exe" -o -name "*.dll" \) ! -path "*/.git/*" -exec ls -lh {} \;
         
-        echo "=== File details ==="
-        find . \( -name "*.exe" -o -name "*.dll" \) -exec ls -lh {} \;
+        echo "=== Checking file types ==="
+        find . -type f \( -name "*.exe" -o -name "*.dll" \) ! -path "*/.git/*" -exec file {} \;
 
     - name: Package artifacts
       shell: pwsh
@@ -86,31 +96,46 @@ jobs:
         $artifactDir = "AltSnap-${{ matrix.arch }}"
         New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
         
-        # Copy build outputs
+        # Find and copy executables and DLLs
         $files = Get-ChildItem -Recurse -Include *.exe,*.dll | Where-Object { 
-          $_.DirectoryName -notmatch '\\.git'
+          $_.DirectoryName -notmatch '\\.git' -and 
+          $_.DirectoryName -notmatch 'msys64'
         }
         
         if ($files.Count -eq 0) {
-          Write-Warning "No build outputs found!"
+          Write-Error "No build outputs found!"
           exit 1
         }
         
         foreach ($file in $files) {
-          Write-Host "Copying: $($file.Name)"
+          Write-Host "Copying: $($file.Name) from $($file.DirectoryName)"
           Copy-Item $file.FullName -Destination $artifactDir -Force
         }
         
-        # Copy additional files
-        @("README.md", "LICENSE", "COPYING", "*.txt") | ForEach-Object {
-          Get-ChildItem $_ -ErrorAction SilentlyContinue | ForEach-Object {
-            Copy-Item $_.FullName -Destination $artifactDir -Force
+        # Copy documentation
+        @("README.md", "LICENSE", "COPYING") | ForEach-Object {
+          if (Test-Path $_) {
+            Write-Host "Copying: $_"
+            Copy-Item $_ -Destination $artifactDir -Force
           }
         }
         
-        # Copy Lang directory
+        # Copy text files
+        Get-ChildItem "*.txt" -ErrorAction SilentlyContinue | ForEach-Object {
+          Write-Host "Copying: $($_.Name)"
+          Copy-Item $_.FullName -Destination $artifactDir -Force
+        }
+        
+        # Copy Lang directory if it exists
         if (Test-Path "Lang") {
+          Write-Host "Copying Lang directory"
           Copy-Item "Lang" -Destination $artifactDir -Recurse -Force
+        }
+        
+        # Show what we're uploading
+        Write-Host "`n=== Artifacts to upload ==="
+        Get-ChildItem $artifactDir -Recurse | ForEach-Object {
+          Write-Host $_.FullName
         }
 
     - name: Upload artifacts
@@ -118,6 +143,14 @@ jobs:
       with:
         name: AltSnap-${{ matrix.arch }}
         path: AltSnap-${{ matrix.arch }}/
+
+    - name: Upload build log
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-log-${{ matrix.arch }}
+        path: build.log
+        if-no-files-found: ignore
 
   release:
     needs: build
@@ -128,18 +161,27 @@ jobs:
     - name: Download artifacts
       uses: actions/download-artifact@v4
       with:
+        pattern: AltSnap-*
         path: artifacts
+        merge-multiple: false
 
     - name: Create release archives
       shell: pwsh
       run: |
-        Compress-Archive -Path artifacts/AltSnap-x86/* -DestinationPath AltSnap-x86.zip
-        Compress-Archive -Path artifacts/AltSnap-x64/* -DestinationPath AltSnap-x64.zip
+        Get-ChildItem artifacts -Directory | ForEach-Object {
+          $zipName = "$($_.Name).zip"
+          Write-Host "Creating $zipName"
+          Compress-Archive -Path "$($_.FullName)/*" -DestinationPath $zipName
+        }
+        
+        Write-Host "`nRelease files:"
+        Get-ChildItem *.zip
 
     - name: Create Release
       uses: softprops/action-gh-release@v1
       with:
-        files: |
-          AltSnap-*.zip
+        files: AltSnap-*.zip
+        draft: false
+        prerelease: false
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
