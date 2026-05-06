@@ -1,39 +1,54 @@
-name: Build AltSnap x64
+name: Build AltSnap for Windows x64
 
 on:
-  workflow_dispatch: # Allows you to click the button to run it manually
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
 
 jobs:
   build-x64:
-    name: Build Windows x64
-    runs-on: windows-latest # Use a standard Windows cloud machine
-
+    runs-on: ubuntu-latest
+    
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      # Installs the standard Windows compiling tools (MinGW/MSYS2)
-      - name: Setup Windows Build Environment
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: MINGW64
-          update: true
-          install: >-
-            make
-            mingw-w64-x86_64-gcc
-
-      # Compiles the .exe and .dll
-      - name: Build AltSnap for x64
-        shell: msys2 {0}
-        run: |
-          make
-
-      # Uploads the finished files so you can download them
-      - name: Upload Build Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: AltSnap-x64-Build
-          path: |
-            AltSnap.exe
-            hooks.dll
-          if-no-files-found: error
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Install MinGW-w64 toolchain
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y mingw-w64 make
+        
+    - name: Verify toolchain installation
+      run: |
+        x86_64-w64-mingw32-gcc --version
+        make --version
+        
+    - name: Build AltSnap for x64
+      run: |
+        make
+        
+    - name: Verify build outputs
+      run: |
+        ls -lh AltSnap.exe hooks.dll
+        file AltSnap.exe hooks.dll
+        
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: altsnap-windows-x64
+        path: |
+          AltSnap.exe
+          hooks.dll
+        retention-days: 30
+        
+    - name: Create release (on tag)
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          AltSnap.exe
+          hooks.dll
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
