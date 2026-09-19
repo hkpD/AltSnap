@@ -3,8 +3,10 @@
 
 //#define UNICODE
 //#define _UNICODE
+#ifndef _WIN32_WINNT
 #define _WIN32_WINNT 0x0600
 #define WINVER 0x0600
+#endif
 #include <windows.h>
 #include "unfuck.h"
 
@@ -14,7 +16,8 @@
 #  define tWinMain WinMain
 #endif
 
-#if defined(__MINGW32__) && ( !defined(__MINGW64_VERSION_MAJOR) || __MINGW64_VERSION_MAJOR < 2 )
+#if !defined(_WIN32_WINNT) || _WIN32_WINNT < 0x0600 \
+  || defined(__MINGW32__) && ( !defined(__MINGW64_VERSION_MAJOR) || __MINGW64_VERSION_MAJOR < 2 )
 // Old version of MINGW64 header or MINGW32 only!
 // Unable to use endpointvolume.h !
 #define NO_OLEAPI
@@ -94,6 +97,7 @@
 #define WM_GETBESTLAYOUT  (WM_USER+18)
 //#define WM_GETZONESLEN    (WM_USER+19)
 #define WM_GETZONES       (WM_USER+20)
+#define WM_REHOOKKB       (WM_USER+21)
 
 // List of possible actions
 // ACVALUE(AC_ENUM, IniString, Info)
@@ -177,35 +181,32 @@ enum {
     ACINFO_ZORDER =  4,
     ACINFO_CLOSE  =  8,
 };
-#define MV ACINFO_MOVE
-#define RZ ACINFO_RESIZE
-#define ZO ACINFO_ZORDER
-#define CL ACINFO_CLOSE
-
-#define MR (ACINFO_MOVE|ACINFO_RESIZE)
 
 // Helper function to get extra action info
 static xpure UCHAR ActionInfo(action_t action)
 {
+    enum {
+        MV = ACINFO_MOVE,
+        RZ = ACINFO_RESIZE,
+        ZO = ACINFO_ZORDER,
+        CL = ACINFO_CLOSE,
+        MR = ACINFO_MOVE|ACINFO_RESIZE,
+    };
     #define ACVALUE(a, b, c) (c),
     static const UCHAR action_info[] = { ACTION_MAP };
 
     #undef ACVALUE
     return action_info[action.ac];
 }
-#undef MV
-#undef RZ
-#undef ZO
-#undef CL
-#undef MR
 
 enum {
-    ACPARAM_NONE = 0,
-    ACPARAM_DIRECTION = 1,
-    ACPARAM_NUMBER = 2,
-    //ACPARAM_DIRECTION_NUMBER = ACPARAM_DIRECTION | ACPARAM_NUMBER,
-    ACPARAM_UPDOWN = 4,
-    //ACPARAM_UPDOWN_NUMBER = ACPARAM_UPDOWN | ACPARAM_NUMBER,
+    ACFL_ZERO  = 0,
+    ACFL_LEFT  = 1,
+    ACFL_UP    = 2,
+    ACFL_RIGHT = 3,
+    ACFL_DOWN  = 4,
+    ACFL_SET   = 5,
+    ACFL_TOGGLE= 6,
 };
 
 #define MOUVEMENT(action) (action.ac <= AC_RESIZE)
@@ -301,11 +302,14 @@ static pure action_t MapActionW(const TCHAR *txt)
                 TCHAR cc = *params++;
                 switch(cc) {
                 // Direction flags
-                case 'L':           flagparam = 1; break; // LEFT
-                case 'U': case 'T': flagparam = 2; break; // UP/TOP
-                case 'R':           flagparam = 3; break; // Right
-                case 'D': case 'B': flagparam = 4; break; // DOWN/BOTTM
+                case 'L': flagparam = ACFL_LEFT;   break;
+                case 'U': flagparam = ACFL_UP;     break;
+                case 'R': flagparam = ACFL_RIGHT;  break;
+                case 'D': flagparam = ACFL_DOWN;   break;
+                case 'S': flagparam = ACFL_SET;    break;
+                case 'T': flagparam = ACFL_TOGGLE; break;
                 default: // Parse an int
+                    --params;
                     for (; cc != '=' && cc != '_' && cc; cc = *params) {
                         flagparam = flagparam * 10 + (cc - TEXT('0'));
                         ++params;
@@ -317,7 +321,7 @@ static pure action_t MapActionW(const TCHAR *txt)
                     // We got 2 parameters.
                     action.wp = strtoi(params); // strtoi stops on any non digit
                 }
-                //LOG("Read action %s_%d_%d",  action_map[ac], (int)action.fl, (int)action.wp);
+                //LOGA("Read action %s_%d_%d",  action_map[ac], (int)action.fl, (int)action.wp);
             }
             // We got the action!
             return action;

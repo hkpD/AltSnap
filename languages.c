@@ -45,10 +45,10 @@ static pure size_t lstrlen_resolved(const TCHAR *__restrict__ str)
     return ptr-str-num_escape_sequences;
 }
 
-static void lstrcpy_resolve(TCHAR *__restrict__ dest, const TCHAR *__restrict__ source)
+static void lstrcpy_resolve(TCHAR *__restrict__ dest, size_t dstlen, const TCHAR *__restrict__ source)
 {
     // Copy from source to dest, resolving \\n to \n
-    for (; *source != '\0'; source++,dest++) {
+    for (; --dstlen && *source != '\0'; source++,dest++) {
         if (*source == '\\' && *(source+1) == 'n') {
             *dest = '\n';
             source++;
@@ -59,6 +59,19 @@ static void lstrcpy_resolve(TCHAR *__restrict__ dest, const TCHAR *__restrict__ 
     *dest = '\0';
 }
 
+static void lstrcpy_encode(TCHAR *__restrict__ dst, size_t dstlen, const TCHAR *__restrict__ src)
+{
+    // Copy from source to dest, encoding '\n' to '\' 'n'
+    for (; --dstlen && *src != '\0'; src++,dst++) {
+        if (dstlen && *src == '\n') {
+            *dst++ = '\\'; *dst = 'n';
+            --dstlen;
+        } else {
+            *dst = *src;
+        }
+    }
+    *dst = '\0';
+}
 /////////////////////////////////////////////////////////////////////////////
 //
 static void LoadTranslationOrTT(const TCHAR *__restrict__ ini, const TCHAR * __restrict__ section_name, int offset)
@@ -77,8 +90,7 @@ static void LoadTranslationOrTT(const TCHAR *__restrict__ ini, const TCHAR * __r
          ret = GetPrivateProfileSection(section_name, tsection, tsectionlen, ini);
     } while (ret == tsectionlen-2);
 
-    if (!ret)
-        tsection[0] = tsection[1] = TEXT('\0');
+    if (!ret || !*tsection) { free(tsection); return; }
 
     if(!l10n_ini) { l10n_ini = (struct strings *)calloc(1, sizeof(struct strings)); }
     if(!l10n_ini) return; // Unable to allocate mem
@@ -88,23 +100,24 @@ static void LoadTranslationOrTT(const TCHAR *__restrict__ ini, const TCHAR * __r
 
     for (size_t i=0; i < ARR_SZ(l10n_inimapping); i++) {
         // Get pointer to default English string to be used if ini entry doesn't exist
-        const TCHAR *const def_val = ((TCHAR **)&en_US)[i*2+offset];
+        const TCHAR *const def_val = ((const TCHAR *const*)&en_US)[i*2+offset];
         const TCHAR *txt = ini_map[i] ? ini_map[i] : def_val;
         if (!txt)
             continue; // default value may be NULL...
 
         TCHAR buf[128];
         TCHAR **deststr = &((TCHAR **)l10n_ini)[i*2+offset];
-        if (deststr == &l10n_ini->AboutVersion) {
+        if (deststr == (TCHAR**)&l10n_ini->AboutVersion) {
             // Append version number to version....
             lstrcpy_s(buf, ARR_SZ(buf), txt);
             lstrcat_s(buf, ARR_SZ(buf), TEXT(" ") TEXT(APP_VERSION));
             txt = (const TCHAR*)buf;
         }
-        TCHAR *t = (TCHAR *)realloc( *deststr, (lstrlen_resolved(txt)+1)*sizeof(TCHAR) );
+        size_t destlen = lstrlen(txt) + 1;
+        TCHAR *t = (TCHAR *)realloc( *deststr, destlen * sizeof(TCHAR) );
         if (!t) continue;
         *deststr = t;
-        lstrcpy_resolve(*deststr, txt);
+        lstrcpy_resolve(*deststr, destlen, txt);
     }
     l10n = l10n_ini;
     free(tsection); // free the cached Translation section.
@@ -114,7 +127,7 @@ static void LoadTranslationOrTT(const TCHAR *__restrict__ ini, const TCHAR * __r
 static void LoadTranslation(const TCHAR *__restrict__ ini)
 {
     if (!ini) {
-        l10n = (struct strings *)&en_US;
+        l10n = (struct strings const *)&en_US;
         return;
     } else if( INVALID_FILE_ATTRIBUTES == GetFileAttributes(ini) ) {
         return;
@@ -130,7 +143,7 @@ struct langinfoitemList {
     size_t cap;
 } langinfo = { NULL, 0, 0 };
 /////////////////////////////////////////////////////////////////////////////
-void ListAllTranslations()
+void ListAllTranslations(void)
 {
     if (langinfo.it) return;
 
@@ -143,9 +156,9 @@ void ListAllTranslations()
     struct langinfoitem *lnfo = (struct langinfoitem *)ListAppend( &langinfo, NULL, sizeof(*lnfo) );
     if (!lnfo) return;
     lstrcpy_s(lnfo->code, ARR_SZ(lnfo->code), en_US.Code);
-    lnfo->lang_english = en_US.LangEnglish;
-    lnfo->lang = en_US.Lang;
-    lnfo->author = en_US.Author;
+    lnfo->lang_english = (TCHAR*)en_US.LangEnglish;
+    lnfo->lang = (TCHAR*)en_US.Lang;
+    lnfo->author = (TCHAR*)en_US.Author;
     lnfo->fn = NULL;
 
     GetModuleFileName(NULL, szDir, ARR_SZ(szDir));
@@ -191,6 +204,35 @@ void ListAllTranslations()
     }
 }
 
+static void Generate_en_US_base_txt(void)
+{
+    HANDLE h = CreateFileA( "en_US.txt", GENERIC_WRITE, 0, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if( h == INVALID_HANDLE_VALUE )
+        return;
+
+    DWORD dummy = 0;
+    TCHAR key[100], val[1000];
+    TCHAR const * const * const def_strings = ((TCHAR const * const *)&en_US);
+    WriteFile(h, "\xFF\xFE", 2, &dummy, NULL); // UTF-16 LE BOM
+    WriteFile(h, TEXT("; Base AltSnap Translation\r\n[Translation]\r\n"), 43 * sizeof(TCHAR), &dummy, NULL);
+
+    for (size_t i = 0; i < ARR_SZ(l10n_inimapping); i++) {
+
+        TCHAR *k = key;
+        const char *p = l10n_inimapping[i];
+        while ((*k++ = *p++));
+
+        const TCHAR *vv = def_strings[i*2];
+        lstrcpy_encode(val, ARR_SZ(val), vv);
+
+        WriteFile(h, key, lstrlen(key) * sizeof(TCHAR), &dummy, NULL);
+        WriteFile(h, TEXT("="), sizeof(TCHAR), &dummy, NULL);
+        WriteFile(h, val, lstrlen(val) * sizeof(TCHAR), &dummy, NULL);
+        WriteFile(h, TEXT("\r\n"), 2 * sizeof(TCHAR), &dummy, NULL);
+    }
+    CloseHandle(h);
+}
+
 #ifdef UNICODE
 /////////////////////////////////////////////////////////////////////////////
 // Helper function to get
@@ -201,7 +243,7 @@ static int GetCUserLanguage_xx_XX(wchar_t txt[AT_LEAST 16])
 }
 #endif
 /////////////////////////////////////////////////////////////////////////////
-void UpdateLanguage()
+void UpdateLanguage(void)
 {
     TCHAR txt[16];
     GetPrivateProfileString(TEXT("General"), TEXT("Language"), TEXT("Auto"), txt, ARR_SZ(txt), inipath);
@@ -227,7 +269,7 @@ void UpdateLanguage()
     }
 }
 
-void FreeAllLangRelated()
+void FreeAllLangRelated(void)
 {
     if (langinfo.it) {
         for (size_t i=1; i < langinfo.num; i++) {

@@ -18,7 +18,7 @@
 #define L10NIDX(entryname) (short)( offsetof(struct strings, entryname)/sizeof(TCHAR**) )
 
 // Resolve entry name from index.
-#define L10NSTR(i) ( ((const TCHAR*const*const)l10n)[i] )
+#define L10NSTR(i) ( ((const TCHAR*const*)l10n)[i] )
 
 struct langinfoitem {
   TCHAR code[8];
@@ -79,7 +79,7 @@ struct langinfoitem {
   LNGVALUE(GeneralResizeCenterMove, TEXT("Mo&ve"), NULL) \
   LNGVALUE(GeneralResizeCenterClose,TEXT("Clos&est side"), NULL) \
   LNGVALUE(GeneralAutostartBox,         TEXT("Autostart"), NULL) \
-  LNGVALUE(GeneralAutostart,            TEXT("S&tart ") APP_NAME TEXT(" when logging on"), NULL) \
+  LNGVALUE(GeneralAutostart,            TEXT("S&tart ") APP_NAME TEXT(" when logging on"), TEXT("KHCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run")) \
   LNGVALUE(GeneralAutostartHide,        TEXT("&Hide tray"), NULL) \
   LNGVALUE(GeneralAutostartElevate,     TEXT("&Elevate to administrator privileges"), NULL) \
   LNGVALUE(GeneralAutostartElevateTip,  TEXT("Note that a UAC prompt will appear every time you log in, unless you disable UAC completely or use the Task Scheduler.\nTo setup a Scheduled task for this purpose, you can use the sch_On.bat batch files in Altsnap's folder."), NULL) \
@@ -228,7 +228,7 @@ struct langinfoitem {
   LNGVALUE(AboutLicense, APP_NAME TEXT(" is free and open source software!\nFeel free to redistribute!"), NULL) \
   LNGVALUE(AboutTranslationCredit, TEXT("Translation credit"), NULL) \
   /* Misc */ \
-  LNGVALUE(MiscUnhookError,      TEXT("There was an error disabling AltDrag. This was most likely caused by Windows having already disabled AltDrag's hooks.\n\nIf this is the first time this has happened, you can safely ignore it and continue using AltDrag.\n\nIf this is happening repeatedly, you can read on the website how to prevent this from happening again (look for 'AltDrag mysteriously stops working' in the documentation)."), NULL) \
+  LNGVALUE(MiscUnhookError,      TEXT("There was an error disabling AltSnap. This was most likely caused by Windows having already disabled AltSnap's hooks.\n\nIf this is the first time this has happened, you can safely ignore it and continue using AltSnap.\n\nIf this is happening repeatedly, you can read on the website how to prevent this from happening again (look for 'AltDrag mysteriously stops working' in the documentation)."), NULL) \
   LNGVALUE(MiscZoneConfirmation, TEXT("Erase old snap layout and save current Test Windows positions as the new snap layout?"), NULL) \
   LNGVALUE(MiscZoneTestWinHelp,  TEXT("To setup Snap layout:\n1) Open several of those Test Windows\n2) Dispose them as you please\n3) Hit the *&Save test windows as snap layout* option in the tray menu"), NULL) \
   /* Basic Verbs */ \
@@ -236,6 +236,10 @@ struct langinfoitem {
   LNGVALUE(WayUp,         TEXT("Up"),         NULL) \
   LNGVALUE(WayRight,      TEXT("Right"),      NULL) \
   LNGVALUE(WayDown,       TEXT("Down"),       NULL) \
+  LNGVALUE(KwdSetTo,      TEXT("Set to"),     NULL) \
+  LNGVALUE(KwdToggle,     TEXT("Toggle"),     NULL) \
+  LNGVALUE(TtlAction,     TEXT("&Action"),     NULL) \
+  LNGVALUE(TtlAdvancedAction, TEXT("Advanced Action"),     NULL) \
   \
   /* Extended character list  for each virtual key */ \
   LNGVALUE(a, TEXT("àáâäæãåª%āăąǎǟǡǣǻǽȁȃȧ|Ȧḁ%ⱥ|Ⱥɐ|Ɐɑ|Ɑɒ|Ɒⲁ|Ⲁⓐ"), NULL) \
@@ -266,7 +270,7 @@ struct langinfoitem {
   LNGVALUE(z, TEXT("ž%źẑżẓẕ%ƶʒƹƺǯȥ|Ȥɀ|Ɀⱬ|Ⱬⓩ"), NULL)
 
 
-#define LNGVALUE(x, y, z) TCHAR *x, *x##_T_T_;
+#define LNGVALUE(x, y, z) const TCHAR *x, *x##_T_T_;
 // String structure definition TCHAR *translation, *tooltip;
 struct strings { LANGUAGE_MAP };
 #undef LNGVALUE

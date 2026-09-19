@@ -20,14 +20,14 @@ static WNDPROC G_HotKeyProc = NULL;
 HINSTANCE hinstDLL = NULL;
 HHOOK keyhook = NULL;
 static DWORD ACMenuItems=-1;
-static char elevated = 0;
-static char ScrollLockState = 0;
+static unsigned char elevated = 0;
+static unsigned char ScrollLockState = 0;
 static char SnapGap = 0;
 static BYTE WinVer = 0;
 
-#define WIN2K (WinVer >= 5)
-#define VISTA (WinVer >= 6)
-#define WIN10 (WinVer >= 10)
+#define WIN2K 5
+#define VISTA 6
+#define WIN10 10
 
 #define ENABLED() (!!keyhook)
 #define GetWindowRectL(hwnd, rect) GetWindowRectLL(hwnd, rect, SnapGap)
@@ -38,7 +38,7 @@ static void UpdateSettings();
 #include "tray.c"
 #include "config.c"
 
-static HINSTANCE LoadHooksDLL()
+static HINSTANCE LoadHooksDLL(void)
 {
     // Load library
     TCHAR path[MAX_PATH];
@@ -49,7 +49,7 @@ static HINSTANCE LoadHooksDLL()
     lstrcat_s(path, ARR_SZ(path), TEXT("\\hooks.dll"));
     return LoadLibrary(path);
 }
-static void FreeHooksDLL()
+static void FreeHooksDLL(void)
 {
     if (hinstDLL) {
         BOOL ret = FreeLibrary(hinstDLL);
@@ -58,7 +58,29 @@ static void FreeHooksDLL()
     }
 }
 /////////////////////////////////////////////////////////////////////////////
-static int HookSystem()
+// Install the low level keyboard hook from HOOKS.DLL, NULL on failure.
+static HHOOK SetKeyboardHook(void)
+{
+    // Get address to keyboard hook (beware name mangling)
+    HOOKPROC procaddr = (HOOKPROC) GetProcAddress(hinstDLL, LOW_LEVEL_KB_PROC);
+    if (procaddr == NULL) {
+        LOG("Could not find " LOW_LEVEL_KB_PROC " entry point in HOOKS.DLL");
+        return NULL;
+    }
+    return SetWindowsHookEx(WH_KEYBOARD_LL, procaddr, hinstDLL, 0);
+}
+// Tell dll file that we are unloading
+static void CallUnload(void)
+{
+    void (WINAPI *Unload)() = (void (WINAPI *)()) GetProcAddress(hinstDLL, UNLOAD_PROC);
+    if (Unload) {
+        Unload();
+        // Zero out the message hwnd from DLL.
+        G_HotKeyProc = NULL;
+    }
+}
+/////////////////////////////////////////////////////////////////////////////
+static int HookSystem(void)
 {
     if (keyhook) return 1; // System already hooked
     LOG("Going to Hook the system...");
@@ -78,16 +100,8 @@ static int HookSystem()
     LOG("HOOKS.DLL Loaded");
 
     // Load keyboard hook
-    HOOKPROC procaddr;
     if (!keyhook) {
-        // Get address to keyboard hook (beware name mangling)
-        procaddr = (HOOKPROC) GetProcAddress(hinstDLL, LOW_LEVEL_KB_PROC);
-        if (procaddr == NULL) {
-            LOG("Could not find "LOW_LEVEL_KB_PROC" entry point in HOOKS.DLL");
-            return 1;
-        }
-        // Set up the keyboard hook
-        keyhook = SetWindowsHookEx(WH_KEYBOARD_LL, procaddr, hinstDLL, 0);
+        keyhook = SetKeyboardHook();
         if (keyhook == NULL) {
             LOG("Keyboard HOOK could not be set");
             return 1;
@@ -104,7 +118,7 @@ static int HookSystem()
 }
 /////////////////////////////////////////////////////////////////////////////
 static int showerror = 1;
-static int UnhookSystem()
+static int UnhookSystem(void)
 {
     LOG("Going to UnHook the system...");
     if (!keyhook) { // System not hooked
@@ -115,21 +129,31 @@ static int UnhookSystem()
     }
     keyhook = NULL;
 
-    // Tell dll file that we are unloading
-    void (WINAPI *Unload)() = (void (WINAPI *)()) GetProcAddress(hinstDLL, UNLOAD_PROC);
-    if (Unload) {
-        Unload();
-        // Zero out the message hwnd from DLL.
-        G_HotKeyProc = NULL;
-    }
-    FreeHooksDLL();
+    CallUnload();
+    //FreeHooksDLL();
 
     // Success
     UpdateTray();
     return 0;
 }
 /////////////////////////////////////////////////////////////////////////////
-void ToggleState()
+// Windows (>= Win7) silently removes a low level hook that took longer than
+// LowLevelHooksTimeout to respond, typically after sleep or lock. We are not
+// notified, so HOOKS.DLL watches for missed input and sends WM_REHOOKKB.
+static void RehookKeyboard(void)
+{
+    if (!keyhook) return; // Disabled, nothing to do.
+    LOG("Re-installing the keyboard HOOK");
+    UnhookWindowsHookEx(keyhook); // Fails if Windows already removed it.
+    keyhook = SetKeyboardHook();
+    if (keyhook == NULL) {
+        LOG("Keyboard HOOK could not be re-set");
+        CallUnload(); // Behave as if the user disabled AltSnap.
+        UpdateTray();
+    }
+}
+/////////////////////////////////////////////////////////////////////////////
+void ToggleState(void)
 {
     if (ENABLED()) {
         UnhookSystem();
@@ -139,7 +163,7 @@ void ToggleState()
     }
 }
 /////////////////////////////////////////////////////////////////////////////
-static void UpdateSettings()
+static void UpdateSettings(void)
 {
     //PostMessage(g_hwnd, WM_UPDATESETTINGS, 0, 0);
     if (ENABLED()) {
@@ -167,10 +191,10 @@ void ShowSClickMenu(HWND hwnd, LPARAM param)
     HMENU menu = CreatePopupMenu();
     UCHAR show_oriclick = (param&LP_NOALTACTION)? AC_ORICLICK: 0xFF;
 
-    #define CHK(LP_FLAG) MF_STRING|((param&LP_FLAG)?MF_CHECKED:MF_UNCHECKED)
+    #define CHK(LP_FLAG) (WORD)( MF_STRING | ((param&LP_FLAG) ? MF_CHECKED : MF_UNCHECKED) )
 
     const struct {
-        UCHAR action; WORD mf; TCHAR *str;
+        UCHAR action; WORD mf; const TCHAR *str;
     } mnlst[] = {
        /* hide, action,      MF_FLAG/CHECKED,    menu string */
         { AC_ALWAYSONTOP, CHK(LP_TOPMOST),    l10n->InputActionAlwaysOnTop },
@@ -207,14 +231,14 @@ void ShowSClickMenu(HWND hwnd, LPARAM param)
 }
 // To get the caret position in screen coordinate.
 // We first try to get the carret rect
-#include <oleacc.h>
+//#include <oleacc.h>
 //static const GUID  my_IID_IAccessible = { 0x618736e0, 0x3c3d, 0x11cf, {0x81, 0x0c, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71} };
 static void GetKaretPos(POINT *pt)
 {
     GUITHREADINFO gui;
     gui.cbSize = sizeof(gui);
     gui.hwndCaret = NULL;
-    if (GetGUIThreadInfo(0, &gui)) {
+    if (GetGUIThreadInfoL(0, &gui)) {
         pt->x = (gui.rcCaret.right + gui.rcCaret.left)>>1;
         pt->y = (gui.rcCaret.top + gui.rcCaret.bottom)>>1;
         if (gui.hwndCaret) {
@@ -244,7 +268,7 @@ static void ShowUnikeyMenu(HWND hwnd, LPARAM param)
 {
     UCHAR vkey = LOBYTE(LOWORD(param));
     UCHAR capital = HIBYTE(LOWORD(param));
-    TCHAR *const* const ukmap = &l10n->a; //EXTRAKEYS_MAP;
+    TCHAR const *const* const ukmap = &l10n->a; //EXTRAKEYS_MAP;
     HMENU menu = CreatePopupMenu();
     if (!menu) return;
 
@@ -315,15 +339,17 @@ static LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
     } else if (msg == WM_UPDATESETTINGS) {
         // Reload hooks
         UpdateSettings();
+    } else if (msg == WM_REHOOKKB) {
+        RehookKeyboard();
     } else if (msg == WM_ADDTRAY) {
-        hide = 0;
+        tray_hidden = 0;
         UpdateTray();
     } else if (msg == WM_UPDATETRAY) {
         UpdateTray();
     } else if (msg == WM_HIDETRAY) {
-        hide = 1;
+        tray_hidden = 1;
         RemoveTray();
-    } else if (msg == WM_OPENCONFIG && (lParam || !hide)) {
+    } else if (msg == WM_OPENCONFIG && (lParam || !tray_hidden)) {
         OpenConfig(wParam);
     } else if (msg == WM_CLOSECONFIG) {
         CloseConfig();
@@ -336,7 +362,7 @@ static LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
         if (wmId == CMD_TOGGLE) {
             ToggleState();
         } else if (wmId == CMD_HIDE) {
-            hide = 1;
+            tray_hidden = 1;
             RemoveTray();
         } else if (wmId == CMD_ELEVATE) {
            ElevateNow(0);
@@ -475,7 +501,7 @@ int WINAPI tWinMain(HINSTANCE hInst, HINSTANCE hPrevInstance, TCHAR *params, int
         return 0;
     }
 
-    hide        = !!lstrstr(params, TEXT("-h"));
+    tray_hidden = !!lstrstr(params, TEXT("-h"));
     int quiet   = !!lstrstr(params, TEXT("-q"));
     int elevate = !!lstrstr(params, TEXT("-e"));
     int multi   = !!lstrstr(params, TEXT("-m"));
@@ -486,7 +512,7 @@ int WINAPI tWinMain(HINSTANCE hInst, HINSTANCE hPrevInstance, TCHAR *params, int
     WinVer = LOBYTE(LOWORD(GetVersion()));
     LOG("Running with Windows version %lX", GetVersion());
     #ifndef NO_VISTA
-    if (WinVer >= 6) { // Vista +
+    if (WinVer >= VISTA) {
         HANDLE token=NULL;
         TOKEN_ELEVATION elevation={0};
         DWORD len=0;
@@ -499,7 +525,7 @@ int WINAPI tWinMain(HINSTANCE hInst, HINSTANCE hPrevInstance, TCHAR *params, int
     }
     #endif // NO_VISTA
     LOG("Command line parameters read, hide=%d, quiet=%d, elevate=%d, multi=%d, config=%d"
-                                     , hide, quiet, elevate, multi, config);
+                                     , tray_hidden, quiet, elevate, multi, config);
 
     // Look for previous instance
     if (!multi && !GetPrivateProfileInt(TEXT("Advanced"), TEXT("MultipleInstances"), 0, inipath)){
@@ -528,10 +554,10 @@ int WINAPI tWinMain(HINSTANCE hInst, HINSTANCE hPrevInstance, TCHAR *params, int
             }
             // Update old instance if no action to be made.
             LOG("Previous instance found and no -multi mode");
-            if(hide)   PostMessage(previnst, WM_CLOSECONFIG, 0, 0);
+            if(tray_hidden) PostMessage(previnst, WM_CLOSECONFIG, 0, 0);
             if(config) PostMessage(previnst, WM_OPENCONFIG, 0, 0);
             if(rlini)  PostMessage(previnst, WM_UPDATESETTINGS, 0, 0);
-            PostMessage(previnst, hide? WM_HIDETRAY : WM_ADDTRAY, 0, 0);
+            PostMessage(previnst, tray_hidden? WM_HIDETRAY : WM_ADDTRAY, 0, 0);
             LOG("Updated old instance and NORMAL EXIT");
             return 0;
         }
@@ -547,7 +573,7 @@ int WINAPI tWinMain(HINSTANCE hInst, HINSTANCE hPrevInstance, TCHAR *params, int
             LOG("Elevation requested");
             TCHAR path[MAX_PATH];
             GetModuleFileName(NULL, path, ARR_SZ(path));
-            HINSTANCE ret = ShellExecute(NULL, TEXT("runas"), path, (hide? TEXT("-h"): NULL), NULL, SW_SHOWNORMAL);
+            HINSTANCE ret = ShellExecute(NULL, TEXT("runas"), path, (tray_hidden? TEXT("-h"): NULL), NULL, SW_SHOWNORMAL);
             if ((DorQWORD)ret > 32) {
                 LOG("Elevation Faild => Not cool NORMAL EXIT");
                 return 0;
@@ -587,8 +613,8 @@ int WINAPI tWinMain(HINSTANCE hInst, HINSTANCE hPrevInstance, TCHAR *params, int
     HookSystem();
 
     // Add tray if hook failed, even though -hide was supplied
-    if (hide && !keyhook) {
-        hide = 0;
+    if (tray_hidden && !keyhook) {
+        tray_hidden = 0;
         UpdateTray();
     }
     // Open config if -config was supplied
@@ -596,7 +622,7 @@ int WINAPI tWinMain(HINSTANCE hInst, HINSTANCE hPrevInstance, TCHAR *params, int
         PostMessage(g_hwnd, WM_OPENCONFIG, 0, 0);
     }
     // Message loop
-    LOG("Starting "APP_NAMEA" message loop...");
+    LOG("Starting " APP_NAMEA " message loop...");
     BOOL ret;
     MSG msg;
     while ((ret = GetMessage( &msg, NULL, 0, 0 )) != 0) {
@@ -616,7 +642,7 @@ int WINAPI tWinMain(HINSTANCE hInst, HINSTANCE hPrevInstance, TCHAR *params, int
 
     CHECK_MEMORY_LEAK_DB();
 
-    return msg.wParam;
+    return (int)msg.wParam;
 }
 static pure const TCHAR *ParamsFromCmdline(const TCHAR *cmdl)
 {
@@ -640,6 +666,9 @@ static pure const TCHAR *ParamsFromCmdline(const TCHAR *cmdl)
 #ifdef _MSC_VER
 #pragma comment(linker, "/entry:\"unfuckWinMain\"")
 #endif
+#ifdef __cplusplus
+extern "C"
+#endif
 void noreturn WINAPI unfuckWinMain(void)
 {
     HINSTANCE hInst;
@@ -650,5 +679,5 @@ void noreturn WINAPI unfuckWinMain(void)
     hInst = GetModuleHandle(NULL);
     szCmdLine = ParamsFromCmdline(GetCommandLine());
 
-    ExitProcess(tWinMain(hInst, hPrevInstance, (TCHAR *)szCmdLine, iCmdShow));
+    ExitProcess((UINT)tWinMain(hInst, hPrevInstance, (TCHAR *)szCmdLine, iCmdShow));
 }

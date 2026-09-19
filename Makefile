@@ -1,73 +1,114 @@
 CC=gcc
 WR=windres
 
-WARNINGS=-Wall  \
+ifdef ComSpec
+	RM = cmd.exe /C del /Q
+else
+	RM = rm -f
+endif
+
+# Common Warnings
+WARNINGS=-Wall -pedantic -Wno-unused-function
+
+WARNINGS+= \
 	-Wformat-security \
-	-Wstrict-overflow \
+	-Wformat=2 \
 	-Wsign-compare \
-	-Wclobbered \
-	-Wempty-body \
-	-Wignored-qualifiers \
-	-Wsuggest-attribute=pure \
-	-Wsuggest-attribute=const \
-	-Wsuggest-attribute=noreturn \
-	-Wimplicit-fallthrough \
 	-Wuninitialized \
-	-Wtype-limits \
-	-Woverride-init \
-	-Wlogical-op \
 	-Wno-multichar \
-	-Wno-attributes \
 	-Wno-unused-function \
 	-Wshadow \
-	-Warray-bounds=2 \
-	-Wstack-usage=4096 \
-	-Werror=vla \
-	-pedantic \
-	-Wc++-compat \
-	-Wstringop-overflow=4 \
-	-Wduplicated-cond \
-	-Wduplicated-branches \
-	-Wnull-dereference \
+	-Wcast-align \
+	-Wredundant-decls $(EXTRA_WARNINGS)
 
+# GCC8+
+#	-Wimplicit-fallthrough \
+#	-Wc++-compat \
+#
+#	-Wformat-signedness \
+#	-Wstrict-overflow \
+#	-Warray-bounds=2 \
+#	-Woverflow \
+#	-Wclobbered \
+#	-Wempty-body \
+#	-Wduplicated-cond \
+#	-Wduplicated-branches \
+#	-Wnull-dereference \
+#	-Wwrite-strings
+#
+#	-Wno-attributes \
+#	-Wignored-qualifiers \
+#	-Woverride-init \
+#	-Wlogical-op \
+#	-Wtype-limits \
+#
+#	-Wsuggest-attribute=pure \
+#	-Wsuggest-attribute=const \
+#	-Wsuggest-attribute=noreturn \
+#
+#	-Wstack-usage=4096 \
+#	-Wframe-larger-than=4096 \
+#	-Werror=vla \
+#	-Walloca \
+#
+#	-Wstringop-overflow=4 \
+#	-Wold-style-declaration \
+#	-Wjump-misses-init \
+#
+
+# GCC 10+
+#WARNINGS += -Warith-conversion
+
+# GCC 13+
+#WARNINGS += -Wuse-after-free=3
+
+# -Wcast-qual
+# -Wsign-conversion
+# -Wconversion
+# -Wcast-qual
+
+# -Wunsafe-loop-optimizations
+# -Wpadded
+# -Wstrict-overflow=5
+# -Wtrivial-auto-var-init -ftrivial-auto-var-init=pattern \
 # -Wunused-parameter
 # -Wtraditional-conversion
 # -fira-region=one/mixed
 # -Wstack-usage=2048
 # -finput-charset=UTF-8
 # -Wc++-compat
-# -fmerge-all-constants
-
+#	-D__USE_MINGW_ANSI_STDIO=0 ## useless now
 # -fanalyzer
 # -mshstk
 
-CFLAGS=-Os -std=c99 \
-	-finput-charset=UTF-8 \
-	-municode -DUNICODE -D_UNICODE \
-	-fvisibility=hidden \
-	-fshort-wchar \
-	-m32 -march=i386 -mtune=i686 \
+######
+# Determines the platform
+EXTRA_TARGET_CFLAGS=-m32 -march=i386 -mtune=i686 \
 	-mpreferred-stack-boundary=2 \
 	-momit-leaf-frame-pointer \
-	-mno-stack-arg-probe \
+	-mno-stack-arg-probe
+
+WR_FLAGS=-Fpe-i386
+# end
+#####
+
+CFLAGS=-Os -std=c99 \
+	$(EXTRA_TARGET_CFLAGS) \
+	$(EXTRA_CFLAGS) \
+	-finput-charset=UTF-8 \
+	-DUNICODE -D_UNICODE \
+	-fshort-wchar \
 	-fno-stack-check \
-	-fno-stack-protector \
 	-fno-ident \
 	-fomit-frame-pointer \
 	-fshort-enums \
 	-fno-exceptions \
-	-fno-dwarf2-cfi-asm \
 	-fno-asynchronous-unwind-tables \
 	-fmerge-all-constants \
-	-fno-semantic-interposition \
 	-fgcse-sm \
-	-fgcse-las \
-	-fipa-pta \
 	-DSTRICT \
-	-D__USE_MINGW_ANSI_STDIO=0 \
 	-Wp,-D_FORTIFY_SOURCE=2 \
 	$(WARNINGS) \
-	-fno-plt
 
 LDFLAGS=-nostdlib \
 	-lmsvcrt \
@@ -91,7 +132,9 @@ EXELD = $(LDFLAGS) \
 	-lcomctl32 \
 	-ladvapi32 \
 	-lshell32 \
-	-Wl,--disable-reloc-section
+	$(EXTRA_EXE_LDFLAGS)
+
+#	-Wl,--disable-reloc-section
 
 default: AltSnap.exe hooks.dll
 
@@ -102,10 +145,10 @@ AltSnap.exe : altsnapr.o altsnap.c hooks.h tray.c config.c languages.h languages
 	$(CC) -o AltSnap.exe altsnap.c altsnapr.o $(CFLAGS) $(EXELD) -mwindows -e_unfuckWinMain@0
 
 altsnapr.o : altsnap.rc window.rc resource.h AltSnap.exe.manifest media/find.cur media/find.ico media/icon.ico media/tray-disabled.ico media/tray-enabled.ico
-	$(WR) altsnap.rc altsnapr.o -Fpe-i386
+	$(WR) altsnap.rc altsnapr.o $(WR_FLAGS)
 
 hooksr.o: hooks.rc resource.h
-	$(WR) hooks.rc hooksr.o -Fpe-i386
+	$(WR) hooks.rc hooksr.o $(WR_FLAGS)
 
 clean :
-	rm altsnapr.o AltSnap.exe hooksr.o hooks.dll
+	$(RM) altsnapr.o AltSnap.exe hooksr.o hooks.dll

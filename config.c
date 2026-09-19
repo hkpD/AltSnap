@@ -144,11 +144,11 @@ static void OpenConfig(int startpage)
     PROPSHEETHEADER psh;
     mem00(&psh, sizeof(psh));
     psh.dwSize = sizeof(psh);
-    psh.dwFlags = VISTA? PSH_PROPSHEETPAGE|PSH_USECALLBACK|PSH_USEHICON|PSH_NOCONTEXTHELP
+    psh.dwFlags = WinVer >= VISTA ? PSH_PROPSHEETPAGE|PSH_USECALLBACK|PSH_USEHICON|PSH_NOCONTEXTHELP
                        : PSH_PROPSHEETPAGE|PSH_USECALLBACK|PSH_USEHICON;
     psh.hwndParent = NULL;
     psh.hInstance = g_hinst;
-    psh.hIcon = icons[1]; //LoadIcon(g_hinst, iconstr[1]);
+    psh.hIcon = g_icons[1]; //LoadIcon(g_hinst, iconstr[1]);
     psh.pszCaption = TEXT(APP_NAMEA);
     psh.nPages = ARR_SZ(psp);
     psh.ppsp = psp;
@@ -160,7 +160,7 @@ static void OpenConfig(int startpage)
     PropertySheet(&psh);
 }
 /////////////////////////////////////////////////////////////////////////////
-static void CloseConfig()
+static void CloseConfig(void)
 {
     PostMessage(g_cfgwnd, WM_CLOSE, 0, 0);
 }
@@ -175,7 +175,7 @@ static void MoveButtonUporDown(WORD id, WINDOWPLACEMENT *wndpl, int diffrows)
     SetWindowPlacement(button, wndpl);
 }
 /////////////////////////////////////////////////////////////////////////////
-static void UpdateStrings()
+static void UpdateStrings(void)
 {
     // Update window title
     PropSheet_SetTitle(g_cfgwnd, 0, l10n->ConfigTitle);
@@ -271,7 +271,7 @@ static BOOL CALLBACK PropSheetProc(HWND hwnd, UINT msg, LPARAM lParam)
     return TRUE;
 }
 /////////////////////////////////////////////////////////////////////////////
-static DWORD IsUACEnabled()
+static DWORD IsUACEnabled(void)
 {
     DWORD uac_enabled = 0;
     if (elevated) {
@@ -346,11 +346,21 @@ static int WriteOptionBoolBW(HWND hwnd, WORD id, const TCHAR *section, const cha
 
 static void WriteOptionStrW(HWND hwnd, WORD id, const TCHAR *section, const char *name_s)
 {
-    TCHAR txt[1024];
     TCHAR name[64];
+    HWND item = GetDlgItem(hwnd, id);
+    int len = GetWindowTextLength(item);
     str2tchar(name, name_s);
-    GetDlgItemText(hwnd, id, txt, ARR_SZ(txt));
-    WritePrivateProfileString(section, name, txt, inipath);
+    if (len < 1024) {
+        TCHAR txt[1024];
+        *txt = TEXT('\0');
+        GetWindowText(item, txt, ARR_SZ(txt));
+        WritePrivateProfileString(section, name, txt, inipath);
+    } else {
+        TCHAR *buf = (TCHAR *)calloc( (len + 1), sizeof(*buf) );
+        GetWindowText(item, buf, len + 1);
+        WritePrivateProfileString(section, name, buf, inipath);
+        free(buf);
+    }
 }
 #define WriteOptionStr(id, section, name)  WriteOptionStrW(hwnd, id, section, name)
 
@@ -359,8 +369,24 @@ static void ReadOptionStrW(HWND hwnd, WORD id, const TCHAR *section, const char 
     TCHAR txt[1024];
     TCHAR name[64];
     str2tchar(name, name_s);
-    GetPrivateProfileString(section, name, def, txt, ARR_SZ(txt), inipath);
-    SetDlgItemText(hwnd, id, txt);
+    DWORD redlen = GetPrivateProfileString(section, name, def, txt, ARR_SZ(txt), inipath);
+    if (redlen < ARR_SZ(txt) - 1) {
+        SetDlgItemText(hwnd, id, txt);
+        return; // DONE!
+    }
+
+    // Fallback to larger heap buffer.
+    TCHAR *buf = NULL;
+    DWORD buflen = 2048;
+    do {
+         buflen *=2;
+         TCHAR *tmp = (TCHAR *)realloc(buf, buflen*sizeof(TCHAR));
+         if(!tmp) { free(buf); return; }
+         buf = tmp;
+         redlen = GetPrivateProfileString(section, name, def, buf, buflen, inipath);
+    } while (redlen == buflen-1);
+    SetDlgItemText(hwnd, id, buf);
+    free(buf);
 }
 #define ReadOptionStr(id, section, name, def) ReadOptionStrW(hwnd, id, section, name, def)
 
@@ -443,9 +469,9 @@ typedef struct optlst {
     short idc;
     UCHAR type;
     UCHAR bitN;
-    TCHAR *section;
-    char *name;
-    void *def;
+    const TCHAR *section;
+    const char *name;
+    const void *def;
 } optlst_t;
 static void ReadDialogOptions(HWND hwnd,const optlst_t *ol, size_t size)
 {
@@ -570,7 +596,7 @@ static INT_PTR CALLBACK GeneralPageDialogProc(HWND hwnd, UINT msg, WPARAM wParam
                 }
             }
         }
-        EnableDlgItem(hwnd, IDC_ELEVATE, VISTA && !elevated);
+        EnableDlgItem(hwnd, IDC_ELEVATE, WinVer >= VISTA && !elevated);
 //    } else if (msg == WM_HELP) {
 //        ShowContextHelp(strlst, ARR_SZ(strlst), hwnd, (LPHELPINFO)lParam);
     } else if (msg == WM_COMMAND) {
@@ -588,7 +614,7 @@ static INT_PTR CALLBACK GeneralPageDialogProc(HWND hwnd, UINT msg, WPARAM wParam
 
         if (id == IDC_AUTOSTART) {
             EnableDlgItem(hwnd, IDC_AUTOSTART_HIDE, val);
-            EnableDlgItem(hwnd, IDC_AUTOSTART_ELEVATE, val && VISTA);
+            EnableDlgItem(hwnd, IDC_AUTOSTART_ELEVATE, val && WinVer >= VISTA);
             if (!val) {
                 CheckDlgButton(hwnd, IDC_AUTOSTART_HIDE, BST_UNCHECKED);
                 CheckDlgButton(hwnd, IDC_AUTOSTART_ELEVATE, BST_UNCHECKED);
@@ -613,8 +639,8 @@ static INT_PTR CALLBACK GeneralPageDialogProc(HWND hwnd, UINT msg, WPARAM wParam
             CheckDlgButton(hwnd, IDC_AUTOSTART_HIDE, hidden ? BST_CHECKED : BST_UNCHECKED);
             CheckDlgButton(hwnd, IDC_AUTOSTART_ELEVATE, eelevated ? BST_CHECKED : BST_UNCHECKED);
             EnableDlgItem(hwnd, IDC_AUTOSTART_HIDE, autostart);
-            EnableDlgItem(hwnd, IDC_AUTOSTART_ELEVATE, autostart && VISTA);
-            if(WIN10) EnableDlgItem(hwnd, IDC_INACTIVESCROLL, IsChecked(IDC_INACTIVESCROLL));
+            EnableDlgItem(hwnd, IDC_AUTOSTART_ELEVATE, autostart && WinVer >= VISTA);
+            if(WinVer >= WIN10) EnableDlgItem(hwnd, IDC_INACTIVESCROLL, IsChecked(IDC_INACTIVESCROLL));
         } else if (pnmh->code == PSN_APPLY && have_to_apply) {
             // all bool options (checkboxes).
             WriteDialogOptions(hwnd, optlst, ARR_SZ(optlst));
@@ -772,12 +798,12 @@ static void CheckConfigHotKeys(const struct hk_struct *hotkeys, HWND hwnd, const
 
 
 typedef struct tagActiondl {
-    TCHAR *action;
+    const TCHAR *action;
     short l10nidx;
     BYTE param1_type;
     BYTE param2_type;
 } actiondl_t;
-static void FillActionDropListS(HWND hwnd, int idc, TCHAR *inioption, const actiondl_t *actions)
+static void FillActionDropListS(HWND hwnd, int idc, const TCHAR *inioption, const actiondl_t *actions)
 {
     HWND control = GetDlgItem(hwnd, idc);
     TCHAR txt[64];
@@ -825,7 +851,7 @@ static int GetActionStringFromDropList(HWND hwnd, int idc, const actiondl_t *act
     }
     return -1;
 }
-static void WriteActionDropListS(HWND hwnd, int idc, TCHAR *inioption, const actiondl_t *actions)
+static void WriteActionDropListS(HWND hwnd, int idc, const TCHAR *inioption, const actiondl_t *actions)
 {
     TCHAR txt[128]; txt[0] = TEXT('\0');
     GetActionStringFromDropList(hwnd, idc, actions, txt, ARR_SZ(txt));
@@ -838,7 +864,7 @@ static INT_PTR CALLBACK MousePageDialogProc(HWND hwnd, UINT msg, WPARAM wParam, 
     // Mouse actions
     static const struct {
         int control; // Same control
-        TCHAR *option[5]; // Prim/alt/TTB/WM/WR
+        const TCHAR *option[5]; // Prim/alt/TTB/WM/WR
     } mouse_buttons[] = {
         { IDC_LMB,     {TEXT("LMB"), TEXT("LMBB"), TEXT("LMBT"), TEXT("LMBM"), TEXT("LMBR")} },
         { IDC_MMB,     {TEXT("MMB"), TEXT("MMBB"), TEXT("MMBT"), TEXT("MMBM"), TEXT("MMBR")} },
@@ -848,7 +874,7 @@ static INT_PTR CALLBACK MousePageDialogProc(HWND hwnd, UINT msg, WPARAM wParam, 
     };
     static const struct {
         int control; // Same control
-        TCHAR *option[5]; // Prim/alt/TTB/WM/WR
+        const TCHAR *option[5]; // Prim/alt/TTB/WM/WR
     } mouse_buttonsUP[] = {
         { IDC_MOVEUP,  {TEXT("MoveUp"), TEXT("MoveUpB"), TEXT("MoveUpT"), TEXT("MoveUp"), TEXT("MoveUp")} },
         { IDC_RESIZEUP,{TEXT("ResizeUp"), TEXT("ResizeUpB"), TEXT("ResizeUpT"), TEXT("ResizeUp"), TEXT("ResizeUp")} },
@@ -917,7 +943,7 @@ static INT_PTR CALLBACK MousePageDialogProc(HWND hwnd, UINT msg, WPARAM wParam, 
     // Scroll
     static const struct {
         int control; // Same control
-        TCHAR *option[5]; // Prim/alt/TTB/WM/WR
+        const TCHAR *option[5]; // Prim/alt/TTB/WM/WR
     } mouse_wheels[] = {
         { IDC_SCROLL,  {TEXT("Scroll"),  TEXT("ScrollB"),  TEXT("ScrollT"), TEXT("ScrollM"), TEXT("ScrollR")}  },
         { IDC_HSCROLL, {TEXT("HScroll"), TEXT("HScrollB"), TEXT("HScrollT"), TEXT("HScrollM"), TEXT("HScrollR") } }
@@ -1143,6 +1169,44 @@ typedef struct tagAdvancedActionParam {
     const actiondl_t *base_action_lst;
     TCHAR outbuf[64];
 } advancedActionParam_t;
+
+enum {
+    ACPARAM_NONE = 0,
+    ACPARAM_DIRECTION,
+    ACPARAM_NUMBER,
+    ACPARAM_UPDOWN,
+    ACPARAM_UPDOWNSETTOGGLE,
+    ACPARAM_LAST,
+};
+static const char* action_fl_param1_maps[ACPARAM_LAST] = {
+/* ACPARAM_NONE            */ NULL,    // Nothing...
+/* ACPARAM_DIRECTION       */ "0LURD", // 0 Left, Up, Right, Down
+/* ACPARAM_NUMBER          */ NULL,    // Nothing
+/* ACPARAM_UPDOWN          */ "0UD",   // 0 Up, Down
+/* ACPARAM_UPDOWNSETTOGGLE */ "0UDST", // 0 Up, Down, Set to, Toggle
+};
+static const short action_fl_strings_direction[] = {
+    0,
+    L10NIDX(WayLeft),
+    L10NIDX(WayUp),
+    L10NIDX(WayRight),
+    L10NIDX(WayDown),
+};
+static const short action_fl_strings_updown_set_toggle[] = {
+    0,
+    L10NIDX(WayUp),
+    L10NIDX(WayDown),
+    L10NIDX(KwdSetTo),
+    L10NIDX(KwdToggle),
+};
+static const struct { size_t num; const short *l10nIdx; } action_fl_l10n_maps[ACPARAM_LAST] = {
+/* ACPARAM_NONE           */ { 0, NULL },
+/* ACPARAM_DIRECTION      */ { ARR_SZ(action_fl_strings_direction), action_fl_strings_direction },
+/* ACPARAM_NUMBER         */ { 0, NULL },
+/* ACPARAM_UPDOWN         */ { 3, action_fl_strings_updown_set_toggle },
+/* ACPARAM_UPDOWNSETTOGGLE*/ { ARR_SZ(action_fl_strings_updown_set_toggle), action_fl_strings_updown_set_toggle },
+};
+
 static INT_PTR CALLBACK AdvancedActionDlgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 {
     switch (msg) {
@@ -1154,13 +1218,8 @@ static INT_PTR CALLBACK AdvancedActionDlgProc(HWND hwnd, UINT msg, WPARAM wp, LP
         FillActionDropListS(hwnd, IDC_ACTIONP0, NULL, acp->base_action_lst);
         SendDlgItemMessage(hwnd, IDC_ACTIONP0, CB_SETCURSEL, (WPARAM)-1, 0);
 
-        /* 1=>LEFT, 2=>TOP, 3=>RIGHT, 4=>BOTTOM */
-        HWND ctrl = GetDlgItem(hwnd, IDC_ACTIONP1);
-        CB_AddString(ctrl, TEXT("---"));      // 0
-        CB_AddString(ctrl, l10n->WayLeft);    // 1 / L
-        CB_AddString(ctrl, l10n->WayUp);      // 2 / U
-        CB_AddString(ctrl, l10n->WayRight);   // 3 / R
-        CB_AddString(ctrl, l10n->WayDown);    // 4 / D
+        SetWindowText(hwnd, l10n->TtlAdvancedAction);
+        SetDlgItemText(hwnd, IDC_ACTIONT, l10n->TtlAction);
 
         // Copy localized OK, CANCEL button from parent
         HWND parent = GetAncestor(hwnd, GA_ROOTOWNER);
@@ -1200,22 +1259,38 @@ static INT_PTR CALLBACK AdvancedActionDlgProc(HWND hwnd, UINT msg, WPARAM wp, LP
 
                 // ACTION PARAM0: base action
                 int p0idx = GetActionStringFromDropList(hwnd, IDC_ACTIONP0, acp->base_action_lst, acstr, ARR_SZ(acstr)-8);
+                BYTE param1_type = acp->base_action_lst[p0idx].param1_type;
+                BYTE param2_type = acp->base_action_lst[p0idx].param2_type;
 
                 if (id == IDC_ACTIONP0 /*|| id == IDC_ACTIONP1*/) {
                     // Adjust visibility/settings of param 1 and param 2.
-                    EnableDlgItem(hwnd, IDC_ACTIONP1, p0idx >= 0 && acp->base_action_lst[p0idx].param1_type != 0);
-                    EnableDlgItem(hwnd, IDC_ACTIONP2, p0idx >= 0 && acp->base_action_lst[p0idx].param2_type != 0);
+                    EnableDlgItem(hwnd, IDC_ACTIONP1, p0idx >= 0 && param1_type != 0);
+                    EnableDlgItem(hwnd, IDC_ACTIONP2, p0idx >= 0 && param2_type != 0);
+                    SetDlgItemText(hwnd, IDC_ACTIONP2, TEXT("")); // Clear number content
+
+                    // Fill Drop List according to PARAM0 of the action.
+                    HWND ctrl = GetDlgItem(hwnd, IDC_ACTIONP1);
+                    CB_ResetContent(ctrl);
+                    for (size_t i = 0; i < action_fl_l10n_maps[param1_type].num; i++) {
+                        short l10nIdx = action_fl_l10n_maps[param1_type].l10nIdx[i];
+                        const TCHAR *str = l10nIdx == 0 ? TEXT("---") : L10NSTR(l10nIdx);
+                        CB_AddString(ctrl, str);
+                    }
                 }
 
                 // ACTION PARAM1: direction flags
                 param1[0] = TEXT('0');  param1[1] = TEXT('\0');
-                int direction = SendDlgItemMessage(hwnd, IDC_ACTIONP1, CB_GETCURSEL, 0, 0);
-                if (direction < 0) {
-                    GetDlgItemText(hwnd, IDC_ACTIONP1, param1, ARR_SZ(param1));
-                } else if (direction <= 4) {
-                    static const TCHAR *directionchars = TEXT("0LURD");
-                    param1[0] = directionchars[direction];
-                    param1[1] = TEXT('\0');
+                if (action_fl_param1_maps[param1_type]) {
+                    // This action type can have parameter1.
+                    int direction = SendDlgItemMessage(hwnd, IDC_ACTIONP1, CB_GETCURSEL, 0, 0);
+                    if (direction < 0) {
+                        GetDlgItemText(hwnd, IDC_ACTIONP1, param1, ARR_SZ(param1));
+                    } else if (direction < (int)lstrlenA(action_fl_param1_maps[param1_type])) {
+                        // Put the correct character in the action string.
+                        // We use a single character for each kind of param
+                        param1[0] = action_fl_param1_maps[param1_type][direction];
+                        param1[1] = TEXT('\0');
+                    }
                 }
                 // ACTION PARAM2 number...
                 int param2len = GetDlgItemText(hwnd, IDC_ACTIONP2, param2, ARR_SZ(param2));
@@ -1293,7 +1368,8 @@ static INT_PTR CALLBACK KeyboardPageDialogProc(HWND hwnd, UINT msg, WPARAM wPara
         {TEXT("Minimize"),    L10NIDX(InputActionMinimize) },
         {TEXT("Maximize"),    L10NIDX(InputActionMaximize) },
         {TEXT("Lower"),       L10NIDX(InputActionLower) },
-        {TEXT("Roll"),        L10NIDX(InputActionRoll) },
+        {TEXT("Roll"),        L10NIDX(InputActionRoll), ACPARAM_UPDOWN },
+        {TEXT("Transparency"),L10NIDX(InputActionTransparency), ACPARAM_UPDOWNSETTOGGLE, ACPARAM_NUMBER },
         {TEXT("AlwaysOnTop"), L10NIDX(InputActionAlwaysOnTop) },
         {TEXT("Borderless"),  L10NIDX(InputActionBorderless) },
         {TEXT("Center"),      L10NIDX(InputActionCenter) },
@@ -1361,7 +1437,7 @@ static INT_PTR CALLBACK KeyboardPageDialogProc(HWND hwnd, UINT msg, WPARAM wPara
       # ifndef _WIN64
         // Always enabled in 64 bit mode.
         EnableDlgItem(hwnd, IDC_AGGRESSIVEPAUSE, HaveProc("NTDLL.DLL", "NtResumeProcess"));
-        EnableDlgItem(hwnd, IDC_UNIKEYHOLDMENU, WIN2K);
+        EnableDlgItem(hwnd, IDC_UNIKEYHOLDMENU, WinVer >= WIN2K);
       # endif
 
     } else if (msg == WM_COMMAND) {
@@ -1589,7 +1665,6 @@ static INT_PTR CALLBACK KeyboardPageDialogProc(HWND hwnd, UINT msg, WPARAM wPara
 /////////////////////////////////////////////////////////////////////////////
 static INT_PTR CALLBACK BlacklistPageDialogProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
-    #pragma GCC diagnostic ignored "-Wint-conversion"
     static const optlst_t optlst[] = {
         { IDC_PROCESSBLACKLIST, T_STR, 0, TEXT("Blacklist"), "Processes", TEXT("") },
         { IDC_BLACKLIST,        T_STR, 0, TEXT("Blacklist"), "Windows", TEXT("") },
@@ -1597,7 +1672,6 @@ static INT_PTR CALLBACK BlacklistPageDialogProc(HWND hwnd, UINT msg, WPARAM wPar
         { IDC_MDIS,             T_STR, 0, TEXT("Blacklist"), "MDIs", TEXT("") },
         { IDC_PAUSEBL,          T_STR, 0, TEXT("Blacklist"), "Pause", TEXT("") },
     };
-    #pragma GCC diagnostic pop
 
     static int have_to_apply = 0;
 
@@ -2091,7 +2165,7 @@ static LRESULT CALLBACK TestWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
                 DrawText(hdc, lastkey[didx], lstrlen(lastkey[didx]), &trc, DT_NOCLIP|DT_TABSTOP);
             }
         }
-        TCHAR *str = l10n->MiscZoneTestWinHelp;
+        const TCHAR *str = l10n->MiscZoneTestWinHelp;
         if (UseZones&1) {
             RECT trc2 = { lineheight/2, lineheight/2, crc.right, splitheight };
             DrawText(hdc, str, lstrlen(str), &trc2, DT_NOCLIP|DT_TABSTOP);
@@ -2131,7 +2205,7 @@ static LRESULT CALLBACK TestWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
 }
 #undef MAXLINES
 
-static HWND NewTestWindow()
+static HWND NewTestWindow(void)
 {
     HWND testwnd;
     WNDCLASS wnd;
@@ -2140,7 +2214,7 @@ static HWND NewTestWindow()
             CS_HREDRAW|CS_VREDRAW
           , TestWindowProc
           , 0, sizeof(LONG_PTR) // To store old GWL_STYLE
-          , g_hinst, icons[1] //LoadIcon(g_hinst, iconstr[1])
+          , g_hinst, g_icons[1] //LoadIcon(g_hinst, iconstr[1])
           , LoadCursor(NULL, IDC_ARROW)
           , NULL //(HBRUSH)(COLOR_BACKGROUND+1)
           , NULL, TEXT(APP_NAMEA)TEXT("-Test")

@@ -8,6 +8,7 @@
 
 #include "hooks.h"
 
+static void SClickActions(HWND hwnd, action_t action);
 static void MoveWindowAsync(HWND hwnd, int x, int y, int w, int h);
 static BOOL CALLBACK EnumMonitorsProc(HMONITOR, HDC, LPRECT , LPARAM );
 static LRESULT CALLBACK MenuWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -486,7 +487,7 @@ static pure int blacklisted_from_names(const blacklist_t *list, const TCHAR *exe
 
     return !mode;
 }
-static void blacklist_cache_state()
+static void blacklist_cache_state(void)
 {
     state.cached_hwnd_blacklist = state.hwnd;
     state.title[0] = state.classname[0] = state.exename[0] = TEXT('\0');
@@ -824,7 +825,7 @@ BOOL CALLBACK EnumSnappedWindows(HWND hwnd, LPARAM lParam)
 }
 // If lParam is set to 1 then only windows that are
 // touching the current window will be considered.
-static void EnumSnapped()
+static void EnumSnapped(void)
 {
     snwnds.num = 0;
     if (conf.SmartAero&1) {
@@ -836,7 +837,7 @@ static void EnumSnapped()
 }
 /////////////////////////////////////////////////////////////////////////////
 // Uses the same DB than snapped windows db because they will never
-// be used together Enum() vs EnumSnapped()
+// be used together Enum() vs EnumSnapped(void)
 BOOL CALLBACK EnumTouchingWindows(HWND hwnd, LPARAM lParam)
 {
     struct snwdata sn;
@@ -875,7 +876,7 @@ static void EndDeferWindowPosNow(HDWP hwndSS)
     LastWin.hwnd = NULL;
 }
 
-static int ShouldResizeTouching()
+static int ShouldResizeTouching(void)
 {
     return state.action.ac == AC_RESIZE
         && ( (conf.StickyResize&1 && state.shift)
@@ -950,7 +951,7 @@ static int ResizeTouchingWindows(LPVOID lwptr)
     return 1;
 }
 /////////////////////////////////////////////////////////////////////////////
-static void ResizeAllSnappedWindows()
+static void ResizeAllSnappedWindows(void)
 {
     if (!conf.StickyResize || !snwnds.num) return;
 
@@ -978,7 +979,7 @@ static void ResizeAllSnappedWindows()
 
 ///////////////////////////////////////////////////////////////////////////
 // Just used in Enum
-static void EnumMdi()
+static void EnumMdi(void)
 {
     // Add MDIClient as the monitor
     RECT rc;
@@ -994,7 +995,7 @@ static void EnumMdi()
 }
 ///////////////////////////////////////////////////////////////////////////
 // Enumerate all monitors/windows/MDI depending on state.
-static void Enum()
+static void Enum(void)
 {
     monitors.num = 0;
     wnds.num = 0;
@@ -1039,7 +1040,7 @@ static void EnumOnce(RECT **bd)
 
     }
 }
-static void EnumSnappedOnce()
+static void EnumSnappedOnce(void)
 {
     if (!(state.enumed&2)) {
         // LOGA("EnumSnapped");
@@ -1815,7 +1816,7 @@ static void AeroResizeSnap(POINT pt, int *posx, int *posy, int *wndwidth, int *w
     }
 }
 /////////////////////////////////////////////////////////////////////////////
-static void HideCursor()
+static void HideCursor(void)
 {
     // Reduce the size to 0 to avoid redrawing.
     if (!IsWindowVisible(g_mainhwnd))
@@ -1834,7 +1835,7 @@ static pure int IsAKeyDown(const UCHAR *k)
 }
 /////////////////////////////////////////////////////////////////////////////
 // Mod Key can return 0 or 1, maybe more in the future...
-static pure int ModKey()
+static pure int ModKey(void)
 {
     return conf.ModKey[0]
         && IsAKeyDown(conf.ModKey);
@@ -1883,7 +1884,7 @@ static xpure int IsModKey(const UCHAR vkey)
     return IsHotkeyy(vkey, conf.ModKey);
 }
 
-static UCHAR TotNumberOfKeysDown()
+static UCHAR TotNumberOfKeysDown(void)
 {
     BYTE kb_state[256];
     GetKeyState(0); // You need that for GetKeyboardState()
@@ -1909,7 +1910,7 @@ static UCHAR TotNumberOfKeysDown()
 // Return true if required amount of hotkeys are holded.
 // If KeyCombo is disabled, user needs to hold only one hotkey.
 // Otherwise, user needs to hold at least two hotkeys.
-static int IsHotkeyDown()
+static int IsHotkeyDown(void)
 {
     // required keys 1 or 2
     UCHAR ckeys = 1 + conf.KeyCombo;
@@ -1925,7 +1926,7 @@ static int IsHotkeyDown()
 }
 
 // returns the number of hotkeys/ModKeys that are pressed.
-static int NumKeysDown()
+static int NumKeysDown(void)
 {
     UCHAR keys = 0;
     // loop over all hotkeys
@@ -1940,7 +1941,7 @@ static int NumKeysDown()
 }
 
 // Double check if Ctrl is down
-static int IsCtrlDown()
+static int IsCtrlDown(void)
 {
     return state.ctrl && GetAsyncKeyState(VK_CONTROL)&0x8000;
 }
@@ -2013,7 +2014,7 @@ static void ClipCursorOnce(const RECT *clip)
     }
 }
 
-static void RestrictCursorToMon()
+static void RestrictCursorToMon(void)
 {
     // Restrict pt within origin monitor if Ctrl is being pressed
     if (IsCtrlDown()) {
@@ -2080,7 +2081,7 @@ static void ShowTransWin(int nCmdShow)
     }
 }
 #define HideTransWin() ShowTransWin(SW_HIDE)
-static BOOL IsTransWinVisible() { return IsVisible(g_transhwnd[0]); }
+static BOOL IsTransWinVisible(void) { return IsVisible(g_transhwnd[0]); }
 
 static void MoveTransWinRaw(int x, int y, int w, int h)
 {
@@ -2484,7 +2485,7 @@ static void SendUnicodeKey(WORD w)
 }
 
 ///////////////////////////////////////////////////////////////////////////
-static void RestrictToCurentMonitor()
+static void RestrictToCurentMonitor(void)
 {
     if (state.action.ac || state.alt) {
         POINT pt;
@@ -2494,7 +2495,7 @@ static void RestrictToCurentMonitor()
     }
 }
 ///////////////////////////////////////////////////////////////////////////
-static void HotkeyUp()
+static void HotkeyUp(void)
 {
     // Prevent the alt keyup from triggering the window menu to be selected
     // The way this works is that the alt key is "disguised" by sending
@@ -2630,7 +2631,7 @@ static void SetForegroundWindowL(HWND hwnd)
 // Returns true if AltDrag must be disabled based on scroll lock
 // If conf.ScrollLockState&2 then Altdrag is disabled by Scroll Lock
 // otherwise it is enabled by Scroll lock.
-static int ScrollLockState()
+static int ScrollLockState(void)
 {
     if (state.altsnaponoff)
         return 1; // AltSnap was disabled by AC_ASONOFF
@@ -2707,7 +2708,7 @@ static int SimulateXButton(WPARAM wp, WORD xbtidx)
     return 1;
 }
 // Destroy AltSnap's menu
-static void KillAltSnapMenu()
+static void KillAltSnapMenu(void)
 {
 //    if (state.unikeymenu) {
 //        EnableWindow(g_mchwnd, FALSE);
@@ -2728,6 +2729,9 @@ static void TogglesAlwaysOnTop(HWND hwnd);
 static HWND MDIorNOT(HWND hwnd, HWND *mdiclient_);
 ///////////////////////////////////////////////////////////////////////////
 // Keep this one minimalist, it is always on.
+// Time stamp of the last keyboard event we received, used by REHOOK_TIMER
+// to detect that Windows silently removed our keyboard hook.
+static DWORD g_kbLastTick, g_kbPrevCheck;
 #ifdef __cplusplus
 extern "C"
 #endif
@@ -2744,6 +2748,7 @@ __declspec(dllexport) LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wP
 //    DWORD scode = kbh->scanCode;
     int xxbtidx;
     HWND fhwnd = NULL;
+    g_kbLastTick = kbh->time; // We are alive.
 //    if (vkey!=VK_F5) { // show key codes
 //        LOGA("wp=%u, vKey=%lx, sCode=%lx, flgs=%lx, ex=%lx"
 //        , wParam, kbh->vkCode, kbh->scanCode, kbh->flags, kbh->dwExtraInfo);
@@ -3203,16 +3208,16 @@ static short ScaleDeltaAndAccum(short delta, short tar_delta)
 static const CLSID my_CLSID_MMDeviceEnumerator= {0xBCDE0395,0xE52F,0x467C,{0x8E,0x3D,0xC4,0x57,0x92,0x91,0x69,0x2E}};
 static const GUID  my_IID_IMMDeviceEnumerator = {0xA95664D2,0x9614,0x4F35,{0xA7,0x46,0xDE,0x8D,0xB6,0x36,0x17,0xE6}};
 static const GUID  my_IID_IAudioEndpointVolume= {0x5CDF2C82,0x841E,0x4546,{0x97,0x22,0x0C,0xF7,0x40,0x78,0x22,0x9A}};
-#define _WIN32_WINNT 0x0600
+/*requires _WIN32_WINNT 0x0600 */
 #include <mmdeviceapi.h>
 #include <endpointvolume.h>
-#undef _WIN32_WINNT
+
 /* OLE32.DLL */
 static HRESULT (WINAPI *myCoInitialize)(LPVOID pvReserved);
 static VOID (WINAPI *myCoUninitialize)( );
 static HRESULT (WINAPI *myCoCreateInstance)(REFCLSID rclsid, LPUNKNOWN pUnkOuter, DWORD dwClsContext, REFIID riid, LPVOID * ppv);
 
-static BOOL LoadOleDll()
+static BOOL LoadOleDll(void)
 {
 
     HINSTANCE h = LoadLibraryA("OLE32.DLL");
@@ -3228,7 +3233,7 @@ static BOOL LoadOleDll()
     return TRUE;
 }
 
-static BOOL LoadOLEDLLOnce()
+static BOOL LoadOLEDLLOnce(void)
 {
     static char HaveV=-1;
     if (HaveV == -1) {
@@ -3328,6 +3333,29 @@ static int ActionTransparency(HWND hwnd, short delta)
     return 1;
 }
 
+static void ActionTransparency2(HWND hwnd, action_t action)
+{
+    //LOGA("Transparency_%d_%d", (int)action.fl, (int)action.wp);
+    int alpha = 255;
+    BYTE old_alpha = 255;
+
+    if (action.fl == ACFL_SET)
+        alpha = action.wp;
+    else if (GetLayeredWindowAttributes(hwnd, NULL, &old_alpha, NULL))
+        alpha = old_alpha;
+
+    if (action.fl == ACFL_UP) // 2=>TOP/UP
+        alpha += action.wp;
+    else if (action.fl == ACFL_DOWN) // 4=>BOTTOM/Down
+        alpha -= action.wp;
+    else if (action.fl == ACFL_TOGGLE)
+        alpha = old_alpha == 255 ? action.wp : 255;
+
+    alpha = CLAMP(conf.MinAlpha, alpha, 255); // Limit alpha
+
+    SetWindowAlpha(hwnd, (BYTE)alpha);
+}
+
 static void SetBottomMost(HWND hwnd)
 {
     HWND lowhwnd = HWND_BOTTOM; // Lowest hwnd to consider.
@@ -3403,6 +3431,7 @@ static void ActionMaxRestMin(HWND hwnd, int delta)
 static void ActionBrightness(const POINT pt, const short delta)
 {
 // Works oly for Desktop monitors.
+#define NO_BRIGHTNESS
 #ifndef NO_BRIGHTNESS
     typedef struct _PHYSICAL_MONITOR {
         HANDLE hPhysicalMonitor;
@@ -3489,7 +3518,7 @@ static void ActionBrightness(const POINT pt, const short delta)
 }
 
 /////////////////////////////////////////////////////////////////////////////
-static HCURSOR CursorToDraw()
+static HCURSOR CursorToDraw(void)
 {
     HCURSOR cursor;
 
@@ -3688,13 +3717,21 @@ static int ActionMove(POINT pt, int button)
     if (IsDoubleClick(button)) {
         SetOriginFromRestoreData(state.hwnd, k_action_move);
         LastWin.hwnd = NULL;
-        if (state.shift) {
-            RollWindow(state.hwnd, 0); // Roll/Unroll Window...
-        } else if (IsCtrlDown()) {
-            MinimizeWindow(state.hwnd);
-        } else if (state.resizable) {
-            // Toggle Maximize window
-            ToggleMaxRestore(state.hwnd);
+
+        action_t acdbclick = GetActionMR(button);
+        if (acdbclick.ac > AC_RESIZE) {
+            // Use the Mouve button + While Moving action as doubleclick action.
+            SClickActions(state.hwnd, acdbclick);
+        } else {
+            // Defult action for double move click
+            if (state.shift) {
+                RollWindow(state.hwnd, 0); // Roll/Unroll Window...
+            } else if (IsCtrlDown()) {
+                MinimizeWindow(state.hwnd);
+            } else if (state.resizable) {
+                // Toggle Maximize window
+                ToggleMaxRestore(state.hwnd);
+            }
         }
         state.action = k_action_none; // Stop move action
         state.clicktime = 0; // Reset double-click time
@@ -3945,8 +3982,15 @@ static int ActionResize(POINT pt, const RECT *wnd, int button)
     }
     // Aero-move this window if this is a double-click
     if (IsDoubleClick(button)) {
+        action_t acdbclick = GetActionMR(button);
+        if (acdbclick.ac > AC_RESIZE) {
+            // Use the Mouve button + While Moving action as doubleclick action.
+            SClickActions(state.hwnd, acdbclick);
+        } else {
+            // Use SnapToCorner by default (legacy)
+            SnapToCorner(state.hwnd, AUTORESIZE, !state.shift ^ !(conf.AeroTopMaximizes&2));
+        }
         state.action = k_action_none;; // Stop resize action
-        SnapToCorner(state.hwnd, AUTORESIZE, !state.shift ^ !(conf.AeroTopMaximizes&2));
         state.blockmouseup = 1; // Block mouse up (context menu would pop)
         state.clicktime = 0;    // Reset double-click time
         // Prevent mousedown from propagating
@@ -4264,6 +4308,8 @@ static LRESULT CALLBACK PinWindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 static HWND CreatePinWindow(const HWND owner)
 {
     WNDCLASS wnd;
+    DWORD ex_flags;
+    HWND ret;
     if(!GetClassInfo(hinstDLL, TEXT(APP_NAMEA)TEXT("-Pin"), &wnd)) {
         // Register the class if no already created.
         mem00(&wnd, sizeof(wnd));
@@ -4281,11 +4327,19 @@ static HWND CreatePinWindow(const HWND owner)
         wnd.lpszClassName =  TEXT(APP_NAMEA)TEXT("-Pin");
         RegisterClass(&wnd);
     }
-    HWND ret = CreateWindowEx(WS_EX_TOOLWINDOW | WS_EX_TOPMOST
+
+    ex_flags = WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE;
+    TryAGAIN:
+    ret = CreateWindowEx(ex_flags
                    , TEXT(APP_NAMEA)TEXT("-Pin"), NULL
                    , WS_POPUP|WS_BORDER /* Start invisible */
                    , 0, 0, 0, 0
                    , owner, NULL, hinstDLL, NULL);
+    if (!ret && ex_flags&WS_EX_NOACTIVATE) {
+        // Some Windows versions cannot handle the WS_EX_NOACTIVATE flag...
+        ex_flags &= ~WS_EX_NOACTIVATE;
+        goto TryAGAIN;
+    }
     // Show pin window without activating it to avoid focus loss.
     ShowWindow(ret, SW_SHOWNA);
     return ret;
@@ -4503,7 +4557,7 @@ static WORD Accel2Int(UCHAR c)
             return (WORD)i;
     return (WORD)0xFFFF;
 }
-#include <oleacc.h>
+/*#include <oleacc.h>*/
 struct menuitemdata {
     #ifdef _UNICODE
     MSAAMENUINFO msaa;
@@ -4557,7 +4611,7 @@ static void TrackMenuOfWindows(WNDENUMPROC EnumProc, LPARAM flags)
     HMENU menu = CreatePopupMenu();
     state.unikeymenu = menu;
     size_t i;
-    TCHAR * const failed_string = TEXT("---");
+    TCHAR * const failed_string = (TCHAR *)TEXT("---");
 
     struct menuitemdata data[36]; // Always fits into the stack
     for (i=0; i < hwnds.num; i++) {
@@ -4642,7 +4696,7 @@ static void ActionStackList(int lasermode)
 {
     PostMessage(g_mainhwnd, WM_STACKLIST, lasermode, (LPARAM)EnumStackedWindowsProc);
 }
-static void ActionASOnOff()
+static void ActionASOnOff(void)
 {
     if (state.action.ac) FinishMovementAsync();
     state.altsnaponoff = !GetProp(g_mainhwnd, APP_ASONOFF);
@@ -4835,6 +4889,7 @@ static void SClickActions(HWND hwnd, action_t action)
     case AC_CENTER2:     CenterWindow(hwnd, !state.shift, /*full*/ 1); break;
     case AC_ALWAYSONTOP: TogglesAlwaysOnTop(hwnd); break;
     case AC_CLOSE:       PostMessage(hwnd, WM_SYSCOMMAND, SC_CLOSE, 0); break;
+    case AC_TRANSPARENCY:ActionTransparency2(hwnd, action); break;
     case AC_LOWER:       ActionLower(hwnd, 0, state.shift, IsCtrlDown()); break;
     case AC_FOCUS:
         if      (action.fl == 0) { ActionLower(hwnd, +120, state.shift, 1); }
@@ -4844,7 +4899,7 @@ static void SClickActions(HWND hwnd, action_t action)
     case AC_KILL:        ActionKill(hwnd); break;
     case AC_PAUSE:       ActionPause(hwnd, 1); break;
     case AC_RESUME:      ActionPause(hwnd, 0); break;
-    case AC_ROLL:        RollWindow(hwnd, 0); break;
+    case AC_ROLL:        RollWindow(hwnd, action.fl == ACFL_UP ? +120 : action.fl == ACFL_DOWN ? -120 : 0); break;
     case AC_MAXHV:       MaximizeHV(hwnd, state.shift); break;
     case AC_MINALL:      MinimizeAllOtherWindows(hwnd, state.shift); break;
     case AC_MUTE:        Send_KEY(VK_VOLUME_MUTE); break;
@@ -4938,12 +4993,12 @@ static int DoWheelActions(HWND hwnd, action_t action)
 }
 
 /////////////////////////////////////////////////////////////////////////////
-static void StartSpeedMes()
+static void StartSpeedMes(void)
 {
     if (conf.AeroMaxSpeed < MAX_SNAP_SPEED)
         SetTimer(g_mainhwnd, SPEED_TIMER, conf.AeroSpeedTau, (TIMERPROC)TimerWindowProc);
 }
-static void StopSpeedMes()
+static void StopSpeedMes(void)
 {
     if (conf.AeroMaxSpeed < MAX_SNAP_SPEED)
         KillTimer(g_mainhwnd, SPEED_TIMER); // Stop speed measurement
@@ -5251,7 +5306,7 @@ static DWORD WINAPI FinishMovementNow(LPVOID pp)
     g_InFinishMovement = 0;
     return 1;
 }
-static void FinishMovementAsync()
+static void FinishMovementAsync(void)
 {
     g_InFinishMovement = 1;
     PostThreadMessage(g_WorkerThreadID, WM_DOWORK, (WPARAM)FinishMovementNow, 0);
@@ -5261,7 +5316,7 @@ static void FinishMovementAsync()
 /////////////////////////////////////////////////////////////////////////////
 // state.action is the current action
 // TODO: Generalize click combo...
-static void LockMovement()
+static void LockMovement(void)
 {
     state.moving = CURSOR_ONLY;
     LastWin.hwnd = NULL;
@@ -5593,7 +5648,7 @@ LRESULT CALLBACK LowLevelMouseProc(int nCode, WPARAM wParam, LPARAM lParam)
 #undef CALLNEXTHOOK
 
 /////////////////////////////////////////////////////////////////////////////
-static void HookMouse()
+static void HookMouse(void)
 {
     state.moving = 0; // Used to know the first time we call MouseMove.
     #ifndef NO_HOOK_LL
@@ -5614,7 +5669,7 @@ static void HookMouse()
     #endif
 }
 /////////////////////////////////////////////////////////////////////////////
-static void UnhookMouseOnly()
+static void UnhookMouseOnly(void)
 {
     // Do not unhook if not hooked or if the hook is still used for something
     if (!mousehook || conf.keepMousehook || state.blockmouseup)
@@ -5628,7 +5683,7 @@ static void UnhookMouseOnly()
     #endif
     mousehook = NULL;
 }
-static void UnhookMouse()
+static void UnhookMouse(void)
 {
     // Stop action
     state.action = k_action_none;
@@ -5662,18 +5717,36 @@ static VOID CALLBACK TimerWindowProc(HWND hwnd, UINT msg, UINT_PTR idEvent, DWOR
 
     //LOG("TimerWindowProc(%x, %u, %u, %lu)", (UINT)(UINT_PTR)hwnd, msg, idEvent, dwTime);
     switch (idEvent) {
-    #ifndef NO_HOOK_LL
     case REHOOK_TIMER: {
         // Silently rehook hooks if they have been stopped (>= Win7 and LowLevelHooksTimeout)
         // This can often happen if locking or sleeping the computer a lot
-        POINT pt;
-        GetCursorPos(&pt); // I donot know if we should really use the ASYN version.
-        if (mousehook && !SamePt(state.prevpt, pt)) {
-            UnhookWindowsHookEx(mousehook);
-            mousehook = SetWindowsHookEx(WH_MOUSE_LL, LowLevelMouseProc, hinstDLL, 0);
+        LASTINPUTINFO lii;
+        DWORD now;
+        #ifndef NO_HOOK_LL
+        if (conf.keepMousehook && mousehook) {
+            POINT pt;
+            GetCursorPos(&pt); // I donot know if we should really use the ASYN version.
+            if (!SamePt(state.prevpt, pt)) {
+                UnhookWindowsHookEx(mousehook);
+                mousehook = SetWindowsHookEx(WH_MOUSE_LL, LowLevelMouseProc, hinstDLL, 0);
+            }
+        }
+        #endif
+        // The keyboard hook (owned by the exe) is always on and can be lost
+        // the same way. Windows does not tell us, so we infer it: if the
+        // user produced input since our last check but the keyboard hook
+        // saw nothing since then, ask the exe to re-install it.
+        // Ages are compared with unsigned arithmetic, so wraparound is fine.
+        lii.cbSize = sizeof(lii);
+        if (GetLastInputInfo(&lii)) {
+            now = GetTickCount();
+            if (now - lii.dwTime < now - g_kbPrevCheck   // Input since last check
+            &&  now - lii.dwTime < now - g_kbLastTick) { // that the hook missed
+                PostMessage(g_mainhwnd, WM_REHOOKKB, 0, 0);
+            }
+            g_kbPrevCheck = now;
         }
         } break;
-    #endif
     case SPEED_TIMER: {
         static POINT oldpt;
         static int has_moved_to_fixed_pt;
@@ -5757,7 +5830,7 @@ static VOID CALLBACK TimerWindowProc(HWND hwnd, UINT msg, UINT_PTR idEvent, DWOR
     default:;
     }
 }
-static void KillAllTimers()
+static void KillAllTimers(void)
 {
     KillTimer(g_mainhwnd, REHOOK_TIMER);
     KillTimer(g_mainhwnd, SPEED_TIMER);
@@ -5905,7 +5978,7 @@ static LRESULT DrawMenuItem(HWND hwnd, WPARAM wParam, LPARAM lParam, UINT dpi, H
 static void SendSYSCOMMANDToMenuItem(HWND hwnd, int id, HMENU hmenu, WPARAM sc_command )
 {
     if (conf.RCCloseMItem
-    && 0 <= id && (UINT)id < hwnds.num
+    && 0 <= id && id < (int)hwnds.num
     && GetWindowLongPtr(hwnd, GWLP_USERDATA) == 3
     && IsWindow(hwnds.it[id]) ) {
         if (sc_command == SC_CLOSE // remove topmost flag for close command
@@ -5928,17 +6001,24 @@ LRESULT CALLBACK MenuWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
     static HWND fhwndori = NULL;
     switch (msg) {
     case WM_CREATE: {
-        // dpi will be 0 on non per-monitor v2 dpi aware.
-        // Below Windows 10, version 1607
-        // In this case the ForDpi() metrics are not available as well and
-        // Everything will be manually scaled.
-        dpi = GetDpiForWindow10L(hwnd) * conf.MenuZoom / 100;
+        // per-monitor dpi awareness since Windows 8.1
+        POINT pt;
+        UINT dpiX = 0, dpiY = 0;
+        GetCursorPos(&pt);
+        HMONITOR hmon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+        dpi = 0;
+        if (hmon && 0 == GetDpiForMonitorL(hmon, MDT_DEFAULT, &dpiX, &dpiY))
+            dpi = dpiY; // OK
+
+        dpi = dpi * conf.MenuZoom / 100;
+        //dpi = GetDpiForWindow10L(hwnd) * conf.MenuZoom / 100;
+
         // Save the original foreground window.
         fhwndori = GetForegroundWindow();
         mfont = NULL;
         } break;
     case WM_DPICHANGED: {
-        dpi = LOWORD(wParam) * conf.MenuZoom / 100; // Update dpi value if changed...
+        dpi = (UINT)LOWORD(wParam) * conf.MenuZoom / 100; // Update dpi value if changed...
         if (mfont) {
             DeleteObject(mfont); // Delete menufont if needed.
             mfont = NULL;
@@ -5990,7 +6070,7 @@ LRESULT CALLBACK MenuWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
     case WM_MBUTTONUP: {
         // The user released the right button.
         // We must close the corresponding Window in the windows list
-        int id = wParam; // Zero-based menu id.
+        int id = (int)wParam; // Zero-based menu id.
         WPARAM sc_command = SC_MINIMIZE;
         HMENU hmenu = (HMENU)lParam;
         if (msg == WM_MBUTTONUP) {
@@ -6000,7 +6080,7 @@ LRESULT CALLBACK MenuWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             pt.x = GET_X_LPARAM(msgpos);
             pt.y = GET_Y_LPARAM(msgpos);
             hmenu = state.unikeymenu;
-            id = MenuItemFromPoint(hwnd, hmenu, pt);
+            id = (int)MenuItemFromPoint(hwnd, hmenu, pt);
             sc_command = SC_CLOSE;
         }
         SendSYSCOMMANDToMenuItem(hwnd, id, hmenu, sc_command);
@@ -6145,26 +6225,26 @@ LRESULT CALLBACK HotKeysWinProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             return 0;
         }
     } else if (msg == WM_STACKLIST) {
-        TrackMenuOfWindows((WNDENUMPROC)lParam, wParam);
+        TrackMenuOfWindows((WNDENUMPROC)lParam, (int)wParam);
         return 0;
     } else if (msg == WM_SETLAYOUTNUM) {
         SetLayoutNumber(wParam);
         return 0;
     } else if (msg == WM_GETLAYOUTREZ) {
-        return GetLayoutRez(wParam);
+        return (LPARAM)GetLayoutRez((int)wParam);
     } else if (msg == WM_GETBESTLAYOUT) {
         return GetBestLayoutFromMonitors();
     } else if (msg == WM_GETZONES) {
         unsigned layout_idx = (unsigned)wParam;
         RECT **dZones = (RECT**)lParam;
         if (dZones) *dZones = Zones[layout_idx].it;
-        return Zones[layout_idx].num; // Return number of zones on the layout
+        return (LRESULT)Zones[layout_idx].num; // Return number of zones on the layout
     }
 
     return DefWindowProc(hwnd, msg, wParam, lParam);
 }
 
-static void freeblacklists()
+static void freeblacklists(void)
 {
     blacklist_t *list = (blacklist_t *)&BlkLst;
     for (size_t i=0; i < sizeof(BlkLst)/sizeof(blacklist_t); i++) {
@@ -6180,7 +6260,7 @@ static void freeallinputSequences(void);
 #ifdef __cplusplus
 extern "C"
 #endif
-__declspec(dllexport) void WINAPI Unload()
+__declspec(dllexport) void WINAPI Unload(void)
 {
 #if defined(_MSC_VER) && _MSC_VER > 1300
 #pragma comment(linker, "/EXPORT:" __FUNCTION__ "=" __FUNCDNAME__)
@@ -6202,7 +6282,7 @@ __declspec(dllexport) void WINAPI Unload()
         }
     }
 
-    for (size_t idx = 0; idx < ARR_SZ(conf.KBShortcutsList); idx++)
+    for (int idx = 0; idx < (int)ARR_SZ(conf.KBShortcutsList); idx++)
         UnregisterHotKey(g_mainhwnd, 0xC001 + idx);
 
     EnumThreadWindows(GetCurrentThreadId(), PostPinWindowsProcMessage, WM_CLOSE);
@@ -6303,15 +6383,11 @@ static void readblacklist(const TCHAR *section, blacklist_t *blacklist, const ch
             exenm = NULL; // exename is a single *
         }
         // Allocate space
-        blacklistitem_t *olditem = blacklist->items;
-        blacklist->items = (blacklistitem_t *)realloc(blacklist->items, (blacklist->length+1)*sizeof(*blacklist->items));
-        if (!blacklist->items) {
-            // restore old item if realloc failed
-            // It will jst be a shorter blacklist
-            // May be NULL as well...
-            blacklist->items=olditem;
+        blacklistitem_t *newitem = (blacklistitem_t *)realloc(blacklist->items, (blacklist->length+1)*sizeof(*blacklist->items));
+        if (!newitem) {
             break; // Stop the loop
         }
+        blacklist->items = newitem;
 
         // Store item
         LOG( "%ls:%ls|%ls", exenm, title, klass);
@@ -6340,7 +6416,7 @@ void readallblacklists(const TCHAR *inipath)
 
 ///////////////////////////////////////////////////////////////////////////
 // Used to read Hotkeys and Hotclicks
-static unsigned readhotkeys(const TCHAR *inisection, const char *name, const TCHAR *def, UCHAR *keys, unsigned MaxKeys)
+static size_t readhotkeys(const TCHAR *inisection, const char *name, const TCHAR *def, UCHAR *keys, unsigned MaxKeys)
 {
     LPCTSTR txt = GetSectionOptionCStr(inisection, name, def);
     size_t i=0;
@@ -6385,7 +6461,7 @@ void readbuttonactions(const TCHAR *inputsection)
 
         char key[32];
         lstrcpy_sA(key, ARR_SZ(key) - 8, buttons[i]);
-        int len = lstrlenA(key);
+        size_t len = lstrlenA(key);
         // Read primary action (no sufix)
         actionptr[NACPB*i+0] = readaction(inputsection, key);
         key[len] = 'B'; key[len+1] = '\0'; // Secondary B sufixe
@@ -6444,7 +6520,7 @@ static HWND KreateMsgWin(WNDPROC proc, const TCHAR *name, LONG_PTR userdata)
 ///////////////////////////////////////////////////////////////////////////
 static void CreateTransWin(const TCHAR *inisection)
 {
-    int color[2];
+    unsigned long color[2];
     // Read the color for the TransWin from ini file
     readhotkeys(inisection, "FrameColor",  TEXT("80 00 80"), (UCHAR *)&color[0], 3);
     WNDCLASS wnd;
@@ -6457,7 +6533,7 @@ static void CreateTransWin(const TCHAR *inisection)
     RegisterClass(&wnd);
     g_transhwnd[0] = NULL;
     if (conf.TransWinOpacity) {
-        int xflags = conf.TransWinOpacity==255
+        DWORD xflags = conf.TransWinOpacity==255
                    ? WS_EX_TOPMOST|WS_EX_TOOLWINDOW
                    : WS_EX_TOPMOST|WS_EX_TOOLWINDOW|WS_EX_LAYERED;
         g_transhwnd[0] = CreateWindowEx(xflags
@@ -6492,8 +6568,8 @@ void registerAllHotkeys(const TCHAR* inipath)
     static const char *action_names[] = { ACTION_MAP };
     #undef ACVALUE
 
-    size_t idx = 0;
-    for (const TCHAR *p = inisection; *p && idx < ARR_SZ(conf.KBShortcutsList); p += lstrlen(p)+1) {
+    int idx = 0;
+    for (const TCHAR *p = inisection; *p && idx < (int)ARR_SZ(conf.KBShortcutsList); p += lstrlen(p)+1) {
         if(*p == ';') continue;
 
         action_t action = MapActionW(p);
@@ -6539,12 +6615,12 @@ void readallinputSequences(const TCHAR *inisection)
 
     for (size_t i=0; i < ARR_SZ(conf.inputSequences); i++) {
         shrtN[4] = i<10? '0' + i: 'A'-10 + i;
-        unsigned len = readhotkeys(inisection, shrtN, TEXT(""), buf+1, 508) / 2;
-        buf[0] = len;
+        size_t len = readhotkeys(inisection, shrtN, TEXT("\0"), buf+1, ARR_SZ(buf)-4) / 2;
+        buf[0] = (UCHAR)len; // We store the amounf of input, not characters, the input includes up or down
         if (len) {
-            UCHAR *seq = (UCHAR *)malloc(len*2+1*sizeof(UCHAR));
+            UCHAR *seq = (UCHAR *)malloc((len*2+1)*sizeof(UCHAR));
             if (seq) {
-                memcpy(seq, buf, len*2+1*sizeof(UCHAR));
+                memcpy(seq, buf, (len*2+1)*sizeof(UCHAR));
                 conf.inputSequences[i] = seq;
             }
         }
@@ -6614,8 +6690,8 @@ __declspec(dllexport) WNDPROC WINAPI Load(HWND mainhwnd, const TCHAR *inipath)
 
     conf.ZoomFrac      = max(2, conf.ZoomFrac);
     conf.ZoomFracShift = max(2, conf.ZoomFracShift);
-    conf.BLCapButtons  = GetSectionOptionInt(inisection, "BLCapButtons", 3);
-    conf.BLUpperBorder = GetSectionOptionInt(inisection, "BLUpperBorder", 3);
+    conf.BLCapButtons  = (DWORD)GetSectionOptionInt(inisection, "BLCapButtons", 3);
+    conf.BLUpperBorder = (DWORD)GetSectionOptionInt(inisection, "BLUpperBorder", 3);
     conf.AeroMaxSpeed  = GetSectionOptionInt(inisection, "AeroMaxSpeed", MAX_SNAP_SPEED);
     conf.LongClickMoveDelay = GetSectionOptionInt(inisection, "LongClickMoveDelay", 0);
     if (conf.LongClickMoveDelay == 0)
@@ -6682,7 +6758,7 @@ __declspec(dllexport) WNDPROC WINAPI Load(HWND mainhwnd, const TCHAR *inipath)
     conf.EndSendKey = eHKs[0];
 
     // Window List accelerator map
-    int nb = readhotkeys(inisection, "MenuAccelMap", NULL, conf.MenuAccelMap, ARR_SZ(conf.MenuAccelMap) - 1);
+    size_t nb = readhotkeys(inisection, "MenuAccelMap", NULL, conf.MenuAccelMap, ARR_SZ(conf.MenuAccelMap) - 1);
 
     // Fill the rest with usual accelerators
     for (size_t j = nb; j < ARR_SZ(conf.MenuAccelMap); j++) {
@@ -6730,8 +6806,10 @@ __declspec(dllexport) WNDPROC WINAPI Load(HWND mainhwnd, const TCHAR *inipath)
     // Hook mouse if a permanent hook is needed
     if (conf.keepMousehook) {
         HookMouse();
-        SetTimer(g_mainhwnd, REHOOK_TIMER, 5000, (TIMERPROC)TimerWindowProc); // Start rehook timer
     }
+    // Start rehook timer, the keyboard hook is installed by the exe right after Load.
+    g_kbLastTick = g_kbPrevCheck = GetTickCount();
+    SetTimer(g_mainhwnd, REHOOK_TIMER, 5000, (TIMERPROC)TimerWindowProc);
 
     // Create worker thread.
     g_WorkerThreadHANDLE = CreateThread(NULL, STACK, WorkerThread, NULL, STACK_SIZE_PARAM_IS_A_RESERVATION, &g_WorkerThreadID);

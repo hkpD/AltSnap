@@ -20,25 +20,26 @@ static struct { // NOTIFYICONDATA for NT4
     TCHAR szTip[64];
 } tray;
 
-static int tray_added = 0;
-static int hide = 0;
-static int UseZones = 0;
-static int LayoutNumber=0;
-static int MaxLayouts=0;
+static unsigned char tray_added = 0;
+static unsigned char tray_hidden = 0;
+static unsigned char UseZones = 0;
+static int LayoutNumber = 0;
+static int MaxLayouts = 0;
 
-static const TCHAR *iconstr[] = {
+enum { ICONS_COUNT = 3};
+static const TCHAR *tray_iconstr[] = {
     TEXT("TRAY_OFF"),
     TEXT("TRAY_ON"),
     TEXT("TRAY_SUS")
 };
-static const TCHAR *traystr[] = {
+static const TCHAR *tray_tooltipstr[] = {
     TEXT(APP_NAMEA)TEXT(" (Off)"),
     TEXT(APP_NAMEA)TEXT(" (On)"),
     TEXT(APP_NAMEA)TEXT("..."),
 };
-static HICON icons[3];
+static HICON g_icons[ICONS_COUNT];
 
-static void LoadAllIcons()
+static void LoadAllIcons(void)
 {
     TCHAR theme[MAX_PATH]; // Get theme name
     int ret = GetPrivateProfileString(TEXT("General"), TEXT("Theme"), TEXT(""), theme, ARR_SZ(theme), inipath);
@@ -55,27 +56,26 @@ static void LoadAllIcons()
             if (len < MAX_PATH-13) { // strlen("TRAY_OFF.ICO")==12
                 UCHAR i;
                 for(i=0; i<3; i++) {
-                    lstrcpy_s(p, ARR_SZ(path)-len, iconstr[i]);
+                    lstrcpy_s(p, ARR_SZ(path)-len, tray_iconstr[i]);
                     lstrcat_s(path, ARR_SZ(path), TEXT(".ico"));
                     HICON tmp = (HICON)LoadImage(g_hinst, path, IMAGE_ICON,0,0, LR_LOADFROMFILE|LR_DEFAULTSIZE|LR_LOADTRANSPARENT);
-                    icons[i] = tmp? tmp: LoadIcon(g_hinst, MAKEINTRESOURCE( TRAY_OFF+i ));
+                    g_icons[i] = tmp? tmp: LoadIcon(g_hinst, MAKEINTRESOURCE( TRAY_OFF+i ));
                 }
                 return;
             }
         }
     }
     // Fallback to internal icons.
-    UCHAR i;
-    for (i=0; i<3; i++)
-        icons[i] = LoadIcon(g_hinst, MAKEINTRESOURCE( TRAY_OFF+i ));
+    for (size_t i = 0; i < ICONS_COUNT; i++)
+        g_icons[i] = LoadIcon(g_hinst, MAKEINTRESOURCE( TRAY_OFF+i ));
 }
 
 /////////////////////////////////////////////////////////////////////////////
-static int InitTray()
+static int InitTray(void)
 {
     ScrollLockState = GetPrivateProfileInt(TEXT("Input"), TEXT("ScrollLockState"), 0, inipath);
-    LayoutNumber    = GetPrivateProfileInt(TEXT("Zones"), TEXT("LayoutNumber"), 0, inipath);
-    MaxLayouts      = GetPrivateProfileInt(TEXT("Zones"), TEXT("MaxLayouts"), 0, inipath);
+    LayoutNumber    = (int)GetPrivateProfileInt(TEXT("Zones"), TEXT("LayoutNumber"), 0, inipath);
+    MaxLayouts      = (int)GetPrivateProfileInt(TEXT("Zones"), TEXT("MaxLayouts"), 0, inipath);
     MaxLayouts = CLAMP(0, MaxLayouts, 10);
     LayoutNumber = CLAMP(0, LayoutNumber, max(0,MaxLayouts-1));
 
@@ -95,7 +95,7 @@ static int InitTray()
     return 0;
 }
 /////////////////////////////////////////////////////////////////////////////
-static int UpdateTray()
+static int UpdateTray(void)
 {
     int Index = !!ENABLED();
     if (Index) {
@@ -105,11 +105,11 @@ static int UpdateTray()
             Index=2;
     }
     // Load info tool tip and tray icon
-    lstrcpy_s(tray.szTip, ARR_SZ(tray.szTip), traystr[Index]);
-    tray.hIcon = icons[Index];
+    lstrcpy_s(tray.szTip, ARR_SZ(tray.szTip), tray_tooltipstr[Index]);
+    tray.hIcon = g_icons[Index];
 
     // Only add or modify if not hidden or if balloon will be displayed
-    if (!hide || tray.uFlags&NIF_INFO) {
+    if (!tray_hidden || tray.uFlags&NIF_INFO) {
         // Try a few times, sleep 100 ms between each attempt
         int i=1;
         LOG("Updating tray icon");
@@ -138,7 +138,7 @@ static int UpdateTray()
     return 0;
 }
 /////////////////////////////////////////////////////////////////////////////
-static int RemoveTray()
+static int RemoveTray(void)
 {
     if (!tray_added)
         return 1;
@@ -153,7 +153,7 @@ static int RemoveTray()
 
 /////////////////////////////////////////////////////////////////////////////
 // Zones functions
-static void WriteCurrentLayoutNumber()
+static void WriteCurrentLayoutNumber(void)
 {
     if (MaxLayouts) {
         TCHAR txt[UINT_DIGITS+1];
@@ -178,7 +178,7 @@ static void SaveZone(const RECT *rc, unsigned num)
     TCHAR txt[64], name[32];
     WritePrivateProfileString(TEXT("Zones"), ZidxToZonestr(LayoutNumber, num, name), RectToStr(rc, txt), inipath);
 }
-static void ClearAllZones()
+static void ClearAllZones(void)
 {
     int i;
     TCHAR txt[128], name[32];
@@ -210,7 +210,7 @@ BOOL CALLBACK SaveTestWindow(HWND hwnd, LPARAM lParam)
     return TRUE;
 }
 
-static void SaveCurrentLayout()
+static void SaveCurrentLayout(void)
 {
     ClearAllZones();
     SaveTestWindow(NULL, 1);
@@ -227,7 +227,7 @@ BOOL CALLBACK CloseTestWindowCB(HWND hwnd, LPARAM lParam)
     return TRUE;
 }
 
-static void CloseAllTestWindows()
+static void CloseAllTestWindows(void)
 {
     EnumThreadWindows(GetCurrentThreadId(), CloseTestWindowCB, 0);
 }
@@ -266,7 +266,7 @@ static void ShowContextMenu(HWND hwnd)
 
     AppendMenu(menu, MF_STRING, CMD_TOGGLE, (ENABLED()?l10n->MenuDisable:l10n->MenuEnable));
     AppendMenu(menu, MF_STRING, CMD_HIDE, l10n->MenuHideTray);
-    if(WinVer >= 6) // Vista+
+    if(WinVer >= VISTA) // Vista+
         InsertMenu(menu, -1, elevated?MF_BYPOSITION|MF_GRAYED:MF_BYPOSITION
                  , CMD_ELEVATE, (elevated? l10n->GeneralElevated: l10n->GeneralElevate));
 

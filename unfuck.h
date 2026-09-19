@@ -49,6 +49,9 @@ enum DWMWINDOWATTRIBUTE {
   DWMWA_VISIBLE_FRAME_BORDER_THICKNESS,
   /* Windows 11 Build 22621 + */
   DWMWA_SYSTEMBACKDROP_TYPE,
+  /* Windows 11 Build 26100 + */
+  DWMWA_REDIRECTIONBITMAP_ALPHA,
+  DWMWA_BORDER_MARGINS,
   DWMWA_LAST,
 };
 
@@ -72,17 +75,18 @@ enum MONITOR_DPI_TYPE {
 
 #define QWORD unsigned long long
 #ifdef _WIN64
-    #define CopyRect(x, y) (*(x) = *(y))
-    #define DorQWORD QWORD
-    #define HIWORDPTR(ll)   ((DWORD) (((QWORD) (ll) >> 32) & 0xFFFFFFFF))
-    #define LOWORDPTR(ll)   ((DWORD) (ll))
-    #define MAKELONGPTR(lo, hi) ((QWORD) (((DWORD) (lo)) | ((QWORD) ((DWORD) (hi))) << 32))
+#   define CopyRect(x, y) (*(x) = *(y))
+#   define DorQWORD QWORD
+#   define HIWORDPTR(ll)   ((DWORD) (((QWORD) (ll) >> 32) & 0xFFFFFFFF))
+#   define LOWORDPTR(ll)   ((DWORD) (ll))
+#   define MAKELONGPTR(lo, hi) ((QWORD) (((DWORD) (lo)) | ((QWORD) ((DWORD) (hi))) << 32))
 #else
-    #define DorQWORD unsigned long
-    #define HIWORDPTR(l)   ((WORD) (((DWORD) (l) >> 16) & 0xFFFF))
-    #define LOWORDPTR(l)   ((WORD) (l))
-    #define MAKELONGPTR(lo, hi) ((DWORD) (((WORD) (lo)) | ((DWORD) ((WORD) (hi))) << 16))
+#   define DorQWORD unsigned long
+#   define HIWORDPTR(l)   ((WORD) (((DWORD) (l) >> 16) & 0xFFFF))
+#   define LOWORDPTR(l)   ((WORD) (l))
+#   define MAKELONGPTR(lo, hi) ((DWORD) (((WORD) (lo)) | ((DWORD) ((WORD) (hi))) << 16))
 #endif
+
 #ifndef LOBYTE
 #define LOBYTE(w) ((BYTE)(w))
 #endif
@@ -149,15 +153,15 @@ typedef struct tagMSAAMENUINFO {
 #endif
 
 #ifndef GetWindowLongPtr
-    #define GetWindowLongPtr GetWindowLong
-    #define SetWindowLongPtr SetWindowLong
-    #define GetClassLongPtr GetClassLong
-    #define SetClassLongPtr SetClassLong
-    #define GWLP_WNDPROC (-4)
-    #define GWLP_HINSTANCE (-6)
-    #define GWLP_HWNDPARENT (-8)
-    #define GWLP_USERDATA (-21)
-    #define GWLP_ID (-12)
+#   define GetWindowLongPtr GetWindowLong
+#   define SetWindowLongPtr SetWindowLong
+#   define GetClassLongPtr GetClassLong
+#   define SetClassLongPtr SetClassLong
+#   define GWLP_WNDPROC (-4)
+#   define GWLP_HINSTANCE (-6)
+#   define GWLP_HWNDPARENT (-8)
+#   define GWLP_USERDATA (-21)
+#   define GWLP_ID (-12)
 #endif
 
 #ifndef PROCESS_SUSPEND_RESUME
@@ -165,68 +169,136 @@ typedef struct tagMSAAMENUINFO {
 #endif
 
 #ifndef WS_EX_LAYERED
-    #define WS_EX_LAYERED 0x00080000
-    #define WS_EX_NOACTIVATE 0x08000000
-    #define LWA_COLORKEY 0x00000001
-    #define LWA_ALPHA 0x00000002
+#   define WS_EX_LAYERED 0x00080000
+#   define WS_EX_NOACTIVATE 0x08000000
+#   define LWA_COLORKEY 0x00000001
+#   define LWA_ALPHA 0x00000002
 #endif
 
 #ifndef WM_XBUTTONDOWN
-    #define GET_WHEEL_DELTA_WPARAM(wParam) ((short)HIWORD(wParam))
-    #define WM_XBUTTONDOWN 0x020B
-    #define WM_XBUTTONUP 0x020C
-    #define WM_XBUTTONDBLCLK 0x020D
-    #define WM_MOUSEHWHEEL 0x020e
-    #define VK_XBUTTON1 0x05
-    #define VK_XBUTTON2 0x06
-    #define VK_VOLUME_MUTE 0xAD
-    #define VK_VOLUME_DOWN 0xAE
-    #define VK_VOLUME_UP 0xAF
-    #define MOUSEEVENTF_XDOWN 0x0080
-    #define MOUSEEVENTF_XUP 0x0100
-    #define KEYEVENTF_UNICODE 0x0004
-    #define KEYEVENTF_SCANCODE 0x0008
+#   define GET_WHEEL_DELTA_WPARAM(wParam) ((short)HIWORD(wParam))
+#   define WM_XBUTTONDOWN 0x020B
+#   define WM_XBUTTONUP 0x020C
+#   define WM_XBUTTONDBLCLK 0x020D
+#   define WM_MOUSEHWHEEL 0x020e
+#   define VK_XBUTTON1 0x05
+#   define VK_XBUTTON2 0x06
+#   define VK_VOLUME_MUTE 0xAD
+#   define VK_VOLUME_DOWN 0xAE
+#   define VK_VOLUME_UP 0xAF
+#   define MOUSEEVENTF_XDOWN 0x0080
+#   define MOUSEEVENTF_XUP 0x0100
+#   define KEYEVENTF_UNICODE 0x0004
+#   define KEYEVENTF_SCANCODE 0x0008
+#endif
+
+#ifndef WM_MENURBUTTONUP
+#define WM_MENURBUTTONUP 0x0122
+#endif
+
+#ifndef IDC_HAND
+#define IDC_HAND MAKEINTRESOURCE(32649)
+#endif
+
+#ifndef HWND_MESSAGE
+#define HWND_MESSAGE ((HWND)-3)
 #endif
 
 #ifndef GCLP_HCURSOR
-    #define GCLP_HCURSOR (-12)
-    #define GCLP_HICON (-14)
+#   define GCLP_HCURSOR (-12)
+#   define GCLP_HICON   (-14)
 #endif
+
+#ifndef GA_ROOT
+#define GA_ROOT      2
+#define GA_ROOTOWNER 3
+#endif
+
+/* Missing Monitor stuffs only availabel on WINVER >= 5 */
+#ifndef MONITOR_DEFAULTTONULL
+#   define MONITOR_DEFAULTTONULL    0
+#   define MONITOR_DEFAULTTOPRIMARY 1
+#   define MONITOR_DEFAULTTONEAREST 2
+
+#   define MONITORINFOF_PRIMARY     1
+
+    typedef HANDLE HMONITOR;
+    typedef BOOL (CALLBACK* MONITORENUMPROC)(HMONITOR, HDC, LPRECT, LPARAM);
+
+    typedef struct tagMONITORINFO {
+        DWORD cbSize;
+        RECT  rcMonitor;
+        RECT  rcWork;
+        DWORD dwFlags;
+    } MONITORINFO, *LPMONITORINFO;
+
+#endif /* MONITOR end */
+
+#ifndef SM_XVIRTUALSCREEN
+#   define SM_XVIRTUALSCREEN       76
+#   define SM_YVIRTUALSCREEN       77
+#   define SM_CXVIRTUALSCREEN      78
+#   define SM_CYVIRTUALSCREEN      79
+#   define SM_CMONITORS            80
+#endif /* SM_XVIRTUALSCREEN */
+
+/* GUITHREADINFO stuff */
+#if !defined(GUI_CARETBLINKING) && WINVER < 0x0500
+#   define GUI_CARETBLINKING   0x01
+#   define GUI_INMOVESIZE      0x02
+#   define GUI_INMENUMODE      0x04
+#   define GUI_SYSTEMMENUMODE  0x08
+#   define GUI_POPUPMENUMODE   0x10
+    typedef struct tagGUITHREADINFO {
+        DWORD cbSize;
+        DWORD flags;
+        HWND  hwndActive;
+        HWND  hwndFocus;
+        HWND  hwndCapture;
+        HWND  hwndMenuOwner;
+        HWND  hwndMoveSize;
+        HWND  hwndCaret;
+        RECT  rcCaret;
+    } GUITHREADINFO, FAR * LPGUITHREADINFO;
+
+#endif /* GUITHREADINFO end */
 
 /*#define LOGA(X, ...) {DWORD err=GetLastError(); FILE *LOG=fopen("ad.log", "a"); fprintf(LOG, X, ##__VA_ARGS__); fprintf(LOG,", LastError=%lu\n",err); fclose(LOG); SetLastError(0); }*/
 #define LOGA LOGfunk
 /* Cool warpper for wvsprintf */
-static void LOGfunk( const char *fmt, ... )
+static void LOGSimple(const char *str, size_t len)
 {
-    DWORD lerr = GetLastError();
-    va_list arglist;
-    char str[512];
+    DWORD dummy = 0;
     HANDLE h;
-
-    va_start( arglist, fmt );
-    wvsprintfA( str, fmt, arglist );
-    va_end( arglist );
-
     h = CreateFileA( "ad.log",
         FILE_APPEND_DATA, FILE_SHARE_READ, NULL, OPEN_ALWAYS,
         FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
     if( h == INVALID_HANDLE_VALUE )
         return;
-    {
-    char lerrorstr[16];
-    DWORD dummy;
+    WriteFile( h, str, len, &dummy, NULL );
+    CloseHandle(h);
+    SetLastError(0);
+}
+static void LOGfunk( const char *fmt, ... )
+{
+    va_list arglist;
+    DWORD lerr = GetLastError();
+    char str[512], lerrorstr[16];
+
+    va_start( arglist, fmt );
+    wvsprintfA( str, fmt, arglist );
+    va_end( arglist );
+
     lstrcat_sA(str, ARR_SZ(str), " (");
     lstrcat_sA(str, ARR_SZ(str), itostrA(lerr, lerrorstr, 10));
     lstrcat_sA(str, ARR_SZ(str), ")\n");
-    WriteFile( h, str, lstrlenA(str), &dummy, NULL );
-    CloseHandle(h);
-    SetLastError(0);
-    }
+    LOGSimple(str, lstrlenA(str));
+
 }
 #ifdef LOG_STUFF
 #define LOG LOGfunk
 #else
-    #define LOG if(0) LOGdummy
+#   define LOG if(0) LOGdummy
     static void LOGdummy(const char *fmt, ...) {}
 #endif
 
@@ -239,12 +311,12 @@ static void LOGfunk( const char *fmt, ... )
 
 #if !defined(__STDC_VERSION__) || __STDC_VERSION__ <= 202300L
 #ifndef static_assert
-    #if defined(__STDC_VERSION__)  && __STDC_VERSION__ >= 201112L
-        /* C11 cool _Static_assert */
-        #define static_assert _Static_assert
-    #else
-        #define static_assert(x, y) do{ enum assert_static__ { assert_static___ = 1/(x) }; }while(0)
-    #endif
+#   if defined(__STDC_VERSION__)  && __STDC_VERSION__ >= 201112L
+       /* C11 cool _Static_assert */
+#      define static_assert _Static_assert
+#   else
+#      define static_assert(x, y) do{ enum assert_static__ { assert_static___ = 1/(x) }; }while(0)
+#   endif
 #endif /* static_assert */
 #endif /* [C89 - C23[ */
 
@@ -257,15 +329,15 @@ static void LOGfunk( const char *fmt, ... )
 #define NtSuspendProcess NtSuspendProcessL
 #define NtResumeProcess NtResumeProcessL
 #ifndef _WIN64
-    #define GetLayeredWindowAttributes GetLayeredWindowAttributesL
-    #define SetLayeredWindowAttributes SetLayeredWindowAttributesL
-    #define GetAncestor GetAncestorL
-    #undef GetMonitorInfo
-    #define GetMonitorInfo GetMonitorInfoL
-    #define EnumDisplayMonitors EnumDisplayMonitorsL
-    #define MonitorFromPoint MonitorFromPointL
-    #define MonitorFromWindow MonitorFromWindowL
-/*    #define GetGUIThreadInfo GetGUIThreadInfoL (NT4 SP3+/Win98+) */
+#   define GetLayeredWindowAttributes GetLayeredWindowAttributesL
+#   define SetLayeredWindowAttributes SetLayeredWindowAttributesL
+#   define GetAncestor GetAncestorL
+#   undef GetMonitorInfo
+#   define GetMonitorInfo GetMonitorInfoL
+#   define EnumDisplayMonitors EnumDisplayMonitorsL
+#   define MonitorFromPoint MonitorFromPointL
+#   define MonitorFromWindow MonitorFromWindowL
+/*#   define GetGUIThreadInfo GetGUIThreadInfoL (NT4 SP3+/Win98+) */
 #endif
 
 /* Helper function to pop a message bow with error code*/
@@ -648,24 +720,6 @@ static BOOL GetGUIThreadInfoL(DWORD pid, GUITHREADINFO *lpgui)
     return FALSE;
 }
 
-static int GetSystemMetricsForDpiL(int  nIndex, UINT dpi)
-{
-    typedef int (WINAPI *funk_t)(int  nIndex, UINT dpi);
-    static funk_t funk=(funk_t)IPTR;
-
-    if (dpi) {
-        if (funk == (funk_t)IPTR) { /* First time */
-            funk = (funk_t)LoadDLLProc("USER32.DLL", "GetSystemMetricsForDpi");
-        }
-        if (funk) { /* We know we have the function */
-            return funk(nIndex, dpi);
-        }
-    }
-    /* Use non dpi stuff if dpi == 0 or if it does not exist. */
-    return GetSystemMetrics(nIndex);
-}
-#define GetSystemMetricsForDpi GetSystemMetricsForDpiL
-
 static HRESULT GetDpiForMonitorL(HMONITOR hmonitor, int dpiType, UINT *dpiX, UINT *dpiY)
 {
     typedef HRESULT (WINAPI *funk_t)(HMONITOR hmonitor, int dpiType, UINT *dpiX, UINT *dpiY);
@@ -679,6 +733,34 @@ static HRESULT GetDpiForMonitorL(HMONITOR hmonitor, int dpiType, UINT *dpiX, UIN
     }
     return 666; /* Fail with 666 error */
 }
+
+static int GetSystemMetricsForDpiL(int  nIndex, UINT dpi)
+{
+    typedef int (WINAPI *funk_t)(int  nIndex, UINT dpi);
+    static funk_t funk=(funk_t)IPTR;
+
+    if (dpi) {
+        if (funk == (funk_t)IPTR) { /* First time */
+            funk = (funk_t)LoadDLLProc("USER32.DLL", "GetSystemMetricsForDpi");
+        }
+        if (funk) { /* We know we have the function */
+            return funk(nIndex, dpi);
+        }
+
+        /* Fallback for Windows < 10 build 1607 and >= 8.1
+         * Get Default display hmonitor to get system DPI
+         * so that we can sacle the metric properly.
+         */
+        HMONITOR hmon = MonitorFromWindow(NULL, MONITOR_DEFAULTTOPRIMARY);
+        UINT dpiX = 0, systemDpi = 0;
+        if (hmon && 0 == GetDpiForMonitorL(hmon, MDT_DEFAULT, &dpiX, &systemDpi) && systemDpi > 0) {
+            return MulDiv(GetSystemMetrics(nIndex), dpi, systemDpi);
+        }
+    }
+    /* Use non dpi stuff if dpi == 0 or if it does not exist. */
+    return GetSystemMetrics(nIndex);
+}
+#define GetSystemMetricsForDpi GetSystemMetricsForDpiL
 
 /* Supported wince Windows 10, version 1607 [desktop apps only] */
 static UINT GetDpiForWindow10L(const HWND hwnd)
@@ -751,7 +833,7 @@ static BOOL EnableNonClientDpiScalingL(HWND hwnd)
     return FALSE;
 }
 /* Only applies to Windows NT for build number */
-static xpure BOOL OredredWinVer()
+static xpure BOOL OredredWinVer(void)
 {
     DWORD oVer;
     DWORD ver = GetVersion();
@@ -785,7 +867,7 @@ static BOOL IsDarkModeEnabled(void)
    }
    return value;
 }
-static BOOL IsHighContrastEnabled()
+static BOOL IsHighContrastEnabled(void)
 {
     HIGHCONTRAST hc = { sizeof(hc) };
     if (SystemParametersInfo(SPI_GETHIGHCONTRAST, sizeof(hc), &hc, FALSE))
@@ -845,7 +927,7 @@ static BOOL SystemParametersInfoForDpiL(UINT uiAction, UINT uiParam, PVOID pvPar
     return SystemParametersInfo(uiAction, uiParam, pvParam, fWinIni);
 }
 #define SystemParametersInfoForDpi SystemParametersInfoForDpiL
-
+#if defined(WINVER) && WINVER >= 0x0500 && defined(WINEVENT_OUTOFCONTEXT)
 static HWINEVENTHOOK SetWinEventHookL(
       DWORD eventMin, DWORD eventMax
     , HMODULE hmodWinEventProc
@@ -879,7 +961,7 @@ static BOOL UnhookWinEventL(HWINEVENTHOOK hWinEventHook)
     /* Failed */
     return FALSE;
 }
-
+#endif /* WINVER >= 0x500 */
 typedef struct tagRgTicTac {
     LARGE_INTEGER sta;
     LARGE_INTEGER end;
@@ -977,7 +1059,7 @@ static HRESULT DwmGetColorizationColorL(DWORD *a, BOOL *b)
     return 666; /* Here we FAIL with 666 error    */
 }
 
-static COLORREF GetSysColorizationColor()
+static COLORREF GetSysColorizationColor(void)
 {
     DWORD color=0;
     BOOL b=FALSE;
@@ -1193,7 +1275,7 @@ static HRESULT DwmIsCompositionEnabledL(BOOL *pfEnabled)
     return ret;
 }
 
-static BOOL HaveDWM()
+static BOOL HaveDWM(void)
 {
     static int first=1;
     static BOOL have_dwm = FALSE;
@@ -1642,7 +1724,7 @@ static pure unsigned AreRectsTouchingInT(const RECT *a, const RECT *b, const int
 }
 static pure unsigned AreRectsTouching2T(const RECT *a, const RECT *b, const int tol)
 {
-	return AreRectsTouchingT(a, b, tol) | AreRectsTouchingInT(a, b, tol) << 16;
+    return AreRectsTouchingT(a, b, tol) | AreRectsTouchingInT(a, b, tol) << 16;
 }
 #endif
 static void CropRect(RECT *__restrict__ wnd, const RECT *crop)
@@ -1787,7 +1869,7 @@ static void RGIniMapSection(const TCHAR *section, /*OUT*/ TCHAR const **map, cha
         char *pk = key;
         while(*p && *p != TEXT('=') && pk < key + 63) *pk++ = *p++; /* Copy key to char, stop at '=' sign */
         *pk = '\0'; p++;
-        //* GetIniMapping_Index(key, ini_mapping, maplen); */
+        /* GetIniMapping_Index(key, ini_mapping, maplen); */
         for (size_t i = 0; i < maplen; i++) {
             if ( !lstrcmpiA(key, ini_mapping[i]) )
                 map[i] = p;
@@ -1807,7 +1889,7 @@ static void* ListAppend(void *list_p, void *elem, size_t elemsize)
         cap = max(cap * 2, 8);
         void *nptr = realloc(list->buf, cap * elemsize);
         if (!nptr) return NULL;
-        //LOGA("ListAppend Reallocated = %u elems / %u bytes", (unsigned)cap, (unsigned)(cap * elemsize));
+        /*LOGA("ListAppend Reallocated = %u elems / %u bytes", (unsigned)cap, (unsigned)(cap * elemsize)); */
 
         list->buf = nptr;
         list->cap = cap;  /* Realloc succeeded, increase count. */
