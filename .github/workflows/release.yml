@@ -1,134 +1,59 @@
-name: Release
+name: Build AltSnap
 
 on:
   push:
-    tags: ['v*', '[0-9]*']   # e.g. v1.69 or 1.69
+    branches: [ "**" ]
+  pull_request:
+    branches: [ "**" ]
+  # Optionally trigger manually
   workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version string (e.g. 1.69)'
-        required: true
-
-permissions:
-  contents: write
 
 jobs:
-  build:
-    runs-on: windows-latest
-    strategy:
-      matrix:
-        include:
-          - arch: x86
-            msystem: MINGW32
-            makefile: Makefile
-            zip_suffix: bin
-          - arch: x64
-            msystem: MINGW64
-            makefile: MakefileX64
-            zip_suffix: bin_x64
 
-    defaults:
-      run:
-        shell: msys2 {0}
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Version
-        id: ver
-        shell: pwsh
-        run: |
-          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
-            $v = "${{ inputs.version }}"
-          } else {
-            $v = "${{ github.ref_name }}".TrimStart('v')
-          }
-          echo "version=$v" >> $env:GITHUB_OUTPUT
-
-      - uses: msys2/setup-msys2@v2
-        with:
-          msystem: ${{ matrix.msystem }}
-          update: true
-          install: >-
-            make zip
-            mingw-w64-${{ matrix.msystem == 'MINGW32' && 'i686' || 'x86_64' }}-gcc
-            mingw-w64-${{ matrix.msystem == 'MINGW32' && 'i686' || 'x86_64' }}-binutils
-
-      - name: Build
-        run: |
-          make -f ${{ matrix.makefile }} clean || true
-          make -f ${{ matrix.makefile }}
-
-      - name: Package zip
-        shell: bash
-        run: |
-          VER="${{ steps.ver.outputs.version }}"
-          OUT="AltSnap${VER}${{ matrix.zip_suffix }}.zip"
-          mkdir -p pkg/Lang
-          cp AltSnap.exe hooks.dll AltSnap.txt AltSnap.xml License.txt pkg/
-          cp AltSnap.dni pkg/AltSnap.ini
-          cp -r Lang/* pkg/Lang/ 2>/dev/null || true
-          cp sch_On.bat sch_Off.bat pkg/ 2>/dev/null || true
-          cp -r Themes pkg/ 2>/dev/null || true
-          (cd pkg && zip -r "../$OUT" .)
-          echo "ZIP=$OUT" >> $GITHUB_ENV
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: release-${{ matrix.arch }}
-          path: AltSnap*.zip
-
-  # Optional ARM64 via Docker on Linux runner
-  build-arm64:
+  build-i386:
+    name: Build i386 (Win32)
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout source
+        uses: actions/checkout@v4
 
-      - name: Version
-        id: ver
+      - name: Install MinGW-w64 (i686)
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            V="${{ inputs.version }}"
-          else
-            V="${GITHUB_REF_NAME#v}"
-          fi
-          echo "version=$V" >> $GITHUB_OUTPUT
+          sudo apt-get update
+          sudo apt-get install -y gcc-mingw-w64-i686 binutils-mingw-w64-i686
 
-      - name: Build ARM64 (dockcross)
-        run: |
-          # First pull may take a while
-          make -f MakefileARM64Docker
+      - name: Build (i386)
+        run: make -f Makefile
 
-      - name: Package
-        run: |
-          VER="${{ steps.ver.outputs.version }}"
-          OUT="AltSnap${VER}bin_arm64.zip"
-          mkdir -p pkg/Lang
-          cp AltSnap.exe hooks.dll AltSnap.txt AltSnap.xml License.txt pkg/
-          cp AltSnap.dni pkg/AltSnap.ini
-          cp -r Lang/* pkg/Lang/ 2>/dev/null || true
-          (cd pkg && zip -r "../$OUT" .)
-
-      - uses: actions/upload-artifact@v4
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
         with:
-          name: release-arm64
-          path: AltSnap*bin_arm64.zip
+          name: AltSnap-i386
+          path: |
+            AltSnap.exe
+            hooks.dll
 
-  publish:
-    needs: [build, build-arm64]
+  build-x64:
+    name: Build x86_64
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          merge-multiple: true
 
-      - name: Create release
-        uses: softprops/action-gh-release@v2
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install MinGW-w64 (x86_64)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-mingw-w64-x86-64 binutils-mingw-w64-x86-64
+
+      - name: Build (x64)
+        run: make -f MakefileX64
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref_name }}
-          name: AltSnap ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
-          generate_release_notes: true
-          files: artifacts/**
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: AltSnap-x64
+          path: |
+            AltSnap.exe
+            hooks.dll
