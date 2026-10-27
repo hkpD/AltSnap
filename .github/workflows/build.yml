@@ -1,54 +1,60 @@
-name: Build AltSnap for Windows x64
+name: Build AltSnap
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [main, master]
   pull_request:
-    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
-  build-x64:
-    runs-on: ubuntu-latest
-    
+  build:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: x86
+            msystem: MINGW32
+            makefile: Makefile
+            artifact: altsnap-x86
+          - name: x64
+            msystem: MINGW64
+            makefile: MakefileX64
+            artifact: altsnap-x64
+
+    defaults:
+      run:
+        shell: msys2 {0}
+
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      
-    - name: Install MinGW-w64 toolchain
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y mingw-w64 make
-        
-    - name: Verify toolchain installation
-      run: |
-        x86_64-w64-mingw32-gcc --version
-        make --version
-        
-    - name: Build AltSnap for x64
-      run: |
-        make
-        
-    - name: Verify build outputs
-      run: |
-        ls -lh AltSnap.exe hooks.dll
-        file AltSnap.exe hooks.dll
-        
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: altsnap-windows-x64
-        path: |
-          AltSnap.exe
-          hooks.dll
-        retention-days: 30
-        
-    - name: Create release (on tag)
-      if: startsWith(github.ref, 'refs/tags/')
-      uses: softprops/action-gh-release@v1
-      with:
-        files: |
-          AltSnap.exe
-          hooks.dll
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: true
+          install: >-
+            make
+            mingw-w64-${{ matrix.msystem == 'MINGW32' && 'i686' || 'x86_64' }}-gcc
+            mingw-w64-${{ matrix.msystem == 'MINGW32' && 'i686' || 'x86_64' }}-binutils
+
+      - name: Build
+        run: make -f ${{ matrix.makefile }}
+
+      - name: Prepare portable package
+        shell: pwsh
+        run: |
+          $dir = "dist/${{ matrix.artifact }}"
+          New-Item -ItemType Directory -Force -Path $dir, "$dir/Lang" | Out-Null
+          Copy-Item AltSnap.exe, hooks.dll, AltSnap.txt, AltSnap.xml, License.txt $dir
+          Copy-Item AltSnap.dni "$dir/AltSnap.ini"
+          if (Test-Path Lang) { Copy-Item Lang\* "$dir/Lang\" -Recurse -ErrorAction SilentlyContinue }
+          # optional extras often shipped
+          if (Test-Path sch_On.bat) { Copy-Item sch_On.bat, sch_Off.bat $dir -ErrorAction SilentlyContinue }
+          if (Test-Path Themes) { Copy-Item Themes $dir -Recurse -ErrorAction SilentlyContinue }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.artifact }}/
+          if-no-files-found: error
