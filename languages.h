@@ -122,6 +122,7 @@ struct langinfoitem {
   LNGVALUE(InputActionKill,      TEXT("&Kill program"), NULL) \
   LNGVALUE(InputActionPause,     TEXT("Pause program"), NULL) \
   LNGVALUE(InputActionResume,    TEXT("Resume program"), NULL) \
+  LNGVALUE(InputActionRevealExe, TEXT("Show program &in Explorer"), NULL) \
   LNGVALUE(InputActionASOnOff,   TEXT("S&uspend/Resume AltSnap"), NULL) \
   LNGVALUE(InputActionMoveOnOff, TEXT("Movement dis&abled"), NULL) \
   LNGVALUE(InputActionMinimize,  TEXT("Mi&nimize window"), NULL) \
@@ -222,7 +223,7 @@ struct langinfoitem {
   LNGVALUE(AdvancedTopmostIndicator, TEXT("Show an i&ndicator on always on top windows"), NULL) \
   /* About Tab */ \
   LNGVALUE(AboutBox,     TEXT("About ") APP_NAME , NULL) \
-  LNGVALUE(AboutVersion, TEXT("Version ") TEXT( APP_VERSION ), NULL) \
+  LNGVALUE(AboutVersion, TEXT("Version"), NULL) \
   LNGVALUE(AboutAuthor,  TEXT("Created by Stefan Sundin"), NULL) \
   LNGVALUE(AboutAuthor2, TEXT("Maintained by Raymond Gillibert"), NULL) \
   LNGVALUE(AboutLicense, APP_NAME TEXT(" is free and open source software!\nFeel free to redistribute!"), NULL) \

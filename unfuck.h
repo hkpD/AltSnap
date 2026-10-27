@@ -52,14 +52,14 @@ enum DWMWINDOWATTRIBUTE {
   /* Windows 11 Build 26100 + */
   DWMWA_REDIRECTIONBITMAP_ALPHA,
   DWMWA_BORDER_MARGINS,
-  DWMWA_LAST,
+  DWMWA_LAST
 };
 
 enum DWM_WINDOW_CORNER_PREFERENCE {
     DWMWCP_DEFAULT = 0,
     DWMWCP_DONOTROUND = 1,
     DWMWCP_ROUND = 2,
-    DWMWCP_ROUNDSMALL = 3,
+    DWMWCP_ROUNDSMALL = 3
 };
 
 enum MONITOR_DPI_TYPE {
@@ -290,7 +290,7 @@ static void LOGfunk( const char *fmt, ... )
     va_end( arglist );
 
     lstrcat_sA(str, ARR_SZ(str), " (");
-    lstrcat_sA(str, ARR_SZ(str), itostrA(lerr, lerrorstr, 10));
+    lstrcat_sA(str, ARR_SZ(str), Uint2lStrA(lerrorstr, lerr));
     lstrcat_sA(str, ARR_SZ(str), ")\n");
     LOGSimple(str, lstrlenA(str));
 
@@ -417,6 +417,18 @@ static DWORD GetMsgPT(POINT *pt)
     pt->y = GET_Y_LPARAM(point);
 
     return point;
+}
+
+static size_t PathGetFileNameStart(const TCHAR *p)
+{
+    size_t i = 0;
+    while(p[i] != '\0') i++;
+    while (i) {
+        if (p[i] == '\\' || p[i] == '/')
+            return i + 1;
+        i--;
+    }
+    return 0;
 }
 
 /* Removes the trailing file name from a path */
@@ -740,6 +752,8 @@ static int GetSystemMetricsForDpiL(int  nIndex, UINT dpi)
     static funk_t funk=(funk_t)IPTR;
 
     if (dpi) {
+        HMONITOR hmon;
+        UINT dpiX = 0, systemDpi = 0;
         if (funk == (funk_t)IPTR) { /* First time */
             funk = (funk_t)LoadDLLProc("USER32.DLL", "GetSystemMetricsForDpi");
         }
@@ -751,8 +765,7 @@ static int GetSystemMetricsForDpiL(int  nIndex, UINT dpi)
          * Get Default display hmonitor to get system DPI
          * so that we can sacle the metric properly.
          */
-        HMONITOR hmon = MonitorFromWindow(NULL, MONITOR_DEFAULTTOPRIMARY);
-        UINT dpiX = 0, systemDpi = 0;
+        hmon = MonitorFromWindow(NULL, MONITOR_DEFAULTTOPRIMARY);
         if (hmon && 0 == GetDpiForMonitorL(hmon, MDT_DEFAULT, &dpiX, &systemDpi) && systemDpi > 0) {
             return MulDiv(GetSystemMetrics(nIndex), dpi, systemDpi);
         }
@@ -1013,6 +1026,33 @@ static HWND HungWindowFromGhostWindowL(HWND gost)
     return NULL;
 }
 
+/* Needed on Windows 8+ to recive the WM_POWERBROADCAST mesage */
+static HPOWERNOTIFY WINAPI RegisterSuspendResumeNotificationL(HANDLE hRecipient, DWORD flag)
+{
+        typedef HPOWERNOTIFY (WINAPI *funk_t)(HANDLE hRecipient, DWORD flag);
+        static funk_t funk = (funk_t)1;
+        if (funk == (funk_t)1)
+                funk = (funk_t)LoadDLLProc("USER32.DLL", "RegisterSuspendResumeNotification");
+
+        if (funk)
+                return funk(hRecipient, flag);
+
+        /* Fallback */
+        return NULL;
+}
+static BOOL WINAPI UnregisterSuspendResumeNotificationL(HPOWERNOTIFY handle)
+{
+        typedef BOOL (WINAPI *funk_t)(HPOWERNOTIFY handle);
+        static funk_t funk = (funk_t)1;
+        if (funk == (funk_t)1)
+                funk = (funk_t)LoadDLLProc("USER32.DLL", "UnregisterSuspendResumeNotification");
+
+        if (funk)
+                return funk(handle);
+
+        /* Fallback */
+        return FALSE;
+}
 
 static HRESULT DwmGetWindowAttributeL(HWND hwnd, DWORD a, PVOID b, DWORD c)
 {
@@ -1358,20 +1398,20 @@ static DWORD GetWindowProgNameFromPid(DWORD pid, TCHAR *title, size_t title_len)
 }
 
 static DWORD GetWindowProgNameSubWindow(DWORD parentpid, HWND parenthwnd, TCHAR *title, size_t title_len);
-static DWORD GetWindowProgName(HWND hwnd, TCHAR *title, size_t title_len)
+static DWORD GetWindowProgNameFullPath(HWND hwnd, TCHAR *title, size_t title_len)
 {
     DWORD pid=0;
+    const TCHAR *p;
     if (!GetWindowThreadProcessId(hwnd, &pid)
     || !pid
     || !GetWindowProgNameFromPid(pid, title, title_len))
         return 0;
 
-    PathStripPathL(title);
-
-    if (pid && !lstrcmpi(title, TEXT("ApplicationFrameHost.exe"))) {
+    p = title + PathGetFileNameStart(title);
+    /* LOGA("%ls -> |%ls|", title, p); */
+    if (pid && !lstrcmpi(p, TEXT("ApplicationFrameHost.exe"))) {
         DWORD pid2 = GetWindowProgNameSubWindow(pid, hwnd, title, title_len);
         if (pid2)  {
-            PathStripPathL(title);
             return pid2;
         }
         /* If there is no child to ApplicationFrameHost.exe, */
@@ -1380,7 +1420,13 @@ static DWORD GetWindowProgName(HWND hwnd, TCHAR *title, size_t title_len)
 
     return pid;
 }
-
+static DWORD GetWindowProgName(HWND hwnd, TCHAR *title, size_t title_len)
+{
+    DWORD pid = GetWindowProgNameFullPath(hwnd, title, title_len);
+    if (pid)
+       PathStripPathL(title);
+    return pid;
+}
 struct pid_pair_struct { DWORD parent_pid; DWORD child_pid; };
 static BOOL CALLBACK GetWindowProgName_subwins_EnumProc(HWND hwnd, LPARAM lp)
 {
@@ -1413,6 +1459,18 @@ static DWORD GetWindowProgNameSubWindow(DWORD parentpid, HWND parenthwnd, TCHAR 
     return 0;
 }
 
+
+/* Open the file manager at the proper folder and select file... */
+static void ShowFileLocationInExplorer(const TCHAR *full_path)
+{
+    TCHAR cmd[MAX_PATH+32];
+    lstrcpy_s(cmd, ARR_SZ(cmd), TEXT("/SELECT, \""));
+    lstrcat_s(cmd, ARR_SZ(cmd), full_path);
+    lstrcat_s(cmd, ARR_SZ(cmd), TEXT("\""));
+
+    /* TODO: Use a better method... */
+    ShellExecute(NULL, TEXT("open"), TEXT("explorer"), cmd, NULL, SW_SHOWNORMAL);
+}
 
 /* Function to get the best possible small icon associated with a window
  * We always use SendMessageTimeout to ensure we do not get  locked
@@ -1784,52 +1842,20 @@ static int LCIDToLocaleNameL(LCID Locale, LPWSTR lpName, int cchName, DWORD dwFl
 }
 #endif /* UNICODE */
 
-#if 0
-/* Get the string inside the section returned by GetPrivateProfileSection */
-static void GetSectionOptionStr(const TCHAR *section, const char * const oname, const TCHAR *def, TCHAR * __restrict__ txt, size_t txtlen)
-{
-    if (section)
-    {
-        TCHAR name[128];
-        str2tchar_s(name, ARR_SZ(name)-1, oname);
-        lstrcat_s(name, ARR_SZ(name), TEXT("=")); /* Add equal at the end of name */
-        const TCHAR *p = section;
-        while (p[0] && p[1]) { /* Double NULL treminated string */
-            if(!lstrcmpi_samestart(p, name)) {
-                /* Copy the buffer */
-                lstrcpy_s(txt, txtlen, p+lstrlen(name));
-                return; /* DONE! */
-            } else {
-                /* Go to next string... */
-                p += lstrlen(p); /* p in on the '\0' */
-                p++; /* next string start. */
-                if (!*p) break;
-            }
-        }
-    }
-    /* Default to the provided def string */
-    if (def)
-        lstrcpy_s(txt, txtlen, def);
-    else if (txtlen)
-        txt[0] = TEXT('\0');  /* Empty string */
-}
-#endif
 static const TCHAR* GetSectionOptionCStr(const TCHAR *section, const char * const oname, const TCHAR *const def)
 {
     if (section) {
-        TCHAR name[128];
-        const TCHAR *p = section;
+        TCHAR name[64];
+        const TCHAR *p;
+        size_t plen;
         str2tchar_s(name, ARR_SZ(name)-1, oname);
         lstrcat_s(name, ARR_SZ(name), TEXT("=")); /* Add equal at the end of name */
-        while (p[0] && p[1]) { /* Double NULL treminated string */
-            if(!lstrcmpi_samestart(p, name)) {
-                return p+lstrlen(name); /* DONE! */
-            } else {
-                /* Go to next string... */
-               p += lstrlen(p); /* p in on the '\0' */
-                p++; /* next string start. */
-                if (!*p) break;
+
+        for (p = section ; *p ; p += plen + 1) { /* Double NULL treminated string */
+            if (!lstrcmpi_samestart(p, name)) {
+                return p + lstrlen(name); /* DONE! */
             }
+            plen = lstrlen(p);
         }
     }
     /* Default to the provided def string */
@@ -1838,41 +1864,34 @@ static const TCHAR* GetSectionOptionCStr(const TCHAR *section, const char * cons
 /* Get the int inside the section returned by GetPrivateProfileSection */
 static int GetSectionOptionInt(const TCHAR *section, const char * const oname, const int def)
 {
-    if (section) {
-        TCHAR name[128];
-        const TCHAR *p = section;
-        str2tchar_s(name, ARR_SZ(name)-1, oname);
-        lstrcat_s(name, ARR_SZ(name), TEXT("=")); /* Add equal at the end of name */
-        while (p[0] && p[1]) { /* Double NULL treminated string */
-            if(!lstrcmpi_samestart(p, name)) {
-                /* DONE !*/
-                return strtoi(p+lstrlen(name));
-            } else {
-                /* Go to next string... */
-                p += lstrlen(p); /* p in on the '\0' */
-                p++; /* next string start. */
-                if (!*p) break;
-            }
-        }
-    }
+    const TCHAR *val = GetSectionOptionCStr(section, oname, NULL);
+    if (val)
+        return strtoi(val);
+
     /* Default to the provided def value */
     return def;
 }
 
 /* MAP Ini file section to a table of strings
  * TODO: use hash map instead of linear search */
-static void RGIniMapSection(const TCHAR *section, /*OUT*/ TCHAR const **map, char const * const * const ini_mapping, size_t maplen)
+static void RGIniMapSection(const TCHAR *section, /*OUT*/ sv_t *map, char const * const * const ini_mapping, size_t maplen)
 {
     char key[64];
+    size_t plen;
+    const TCHAR *p;
     mem00(map, sizeof(*map) * maplen); /* Always zero out */
-    for (const TCHAR *p = section; *p; p += lstrlen(p) + 1) {
+    for (p = section; *p; p += plen + 1) {
         char *pk = key;
+        size_t i;
         while(*p && *p != TEXT('=') && pk < key + 63) *pk++ = *p++; /* Copy key to char, stop at '=' sign */
         *pk = '\0'; p++;
         /* GetIniMapping_Index(key, ini_mapping, maplen); */
-        for (size_t i = 0; i < maplen; i++) {
-            if ( !lstrcmpiA(key, ini_mapping[i]) )
-                map[i] = p;
+        plen = lstrlen(p);
+        for (i = 0; i < maplen; i++) {
+            if ( !lstrcmpiA(key, ini_mapping[i]) ) {
+                map[i].it = p;
+                map[i].len = plen;
+            }
         }
     }
 }

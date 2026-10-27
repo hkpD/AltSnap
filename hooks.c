@@ -13,7 +13,7 @@ static void MoveWindowAsync(HWND hwnd, int x, int y, int w, int h);
 static BOOL CALLBACK EnumMonitorsProc(HMONITOR, HDC, LPRECT , LPARAM );
 static LRESULT CALLBACK MenuWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 static VOID CALLBACK TimerWindowProc(HWND hwnd, UINT msg, UINT_PTR idEvent, DWORD dwTime);
-LRESULT CALLBACK HotKeysWinProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
+LRESULT CALLBACK HooksWinPorc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 // Timer messages
 #define PIN_TIMER         (1)
@@ -50,6 +50,8 @@ static DWORD g_WorkerThreadID;
 static HANDLE g_WorkerThreadHANDLE;
 static UCHAR g_InFinishMovement;
 static UCHAR g_InMouseMove;
+//static DWORD g_lastKeyboardTick;
+//static HPOWERNOTIFY g_suspendResumeNotificationHANDLE;
 
 static void UnhookMouse();
 static void HookMouse();
@@ -427,11 +429,12 @@ static const char *BlackListStrings[] = {
     "Bottommost"
 };
 // Cursor data
-HWND g_mainhwnd = NULL;
+static HWND g_mainhwnd = NULL;
 
 // Hook data
-HINSTANCE hinstDLL = NULL;
-HHOOK mousehook = NULL;
+static HINSTANCE hinstDLL = NULL;
+static HHOOK mousehook = NULL;
+static HHOOK g_keyhook = NULL;
 
 #define FixDWMRect(hwnd, rect) FixDWMRectLL(hwnd, rect, conf.SnapGap)
 #undef GetWindowRectL
@@ -1075,11 +1078,11 @@ void MoveSnap(int *_posx, int *_posy, int wndwidth, int wndheight, UCHAR pth)
         unsigned sflag = 0;
 
         // Get snapwnd
-        if (monitors.it && i < monitors.num) {
+        if (i < monitors.num) {
             snapwnd = monitors.it[i];
             snapinside = 1;
             i++;
-        } else if (wnds.it && j < wnds.num) {
+        } else if (j < wnds.num) {
             snapwnd = wnds.it[j].rc;
             sflag   = wnds.it[j].flag;
             snapinside = (state.snap != 2);
@@ -1178,11 +1181,11 @@ static void ResizeSnap(int *posx, int *posy, int *wndwidth, int *wndheight, UCHA
         UCHAR snapinside;
 
         // Get snapwnd
-        if (monitors.it && i < monitors.num) {
+        if (i < monitors.num) {
             CopyRect(&snapwnd, &monitors.it[i]);
             snapinside = 1;
             i++;
-        } else if (wnds.it && j < wnds.num) {
+        } else if (j < wnds.num) {
             CopyRect(&snapwnd, &wnds.it[j].rc);
             snapinside = (state.snap != 2);
             j++;
@@ -1405,6 +1408,19 @@ static void MoveWindowAsync(HWND hwnd, int x, int y, int w, int h)
  * emulators can snap to their character-cell grid.  */
 static BOOL LetWindowKickBack(HWND hwnd, struct windowRR *lw)
 {
+    /* Apply the blacklist (also applies to WM_*SIZEMOVE) */
+    if (blacklisted(hwnd, &BlkLst.SSizeMove))
+        return FALSE;
+
+    /* WM_SIZING may enforce minimum width/height */
+    if (conf.IgnoreMinMaxInfo != 0) {
+        rgMMI_t mmi;
+        GetMinMaxInfoF(hwnd, &mmi.Min, &mmi.Max, 0); // for CLAMPHL/WL functions
+
+        if (CLAMPWL(lw->width, &mmi) != lw->width || CLAMPHL(lw->height, &mmi) != lw->height)
+            return FALSE;
+    }
+
     static const unsigned char map[3][3] = {
     //             LEFT              RIGHT             XCENTER
     /* TOP */    { WMSZ_TOPLEFT,     WMSZ_TOPRIGHT,    WMSZ_TOP         },
@@ -2599,6 +2615,22 @@ static int ActionKill(HWND hwnd)
 
     return 1;
 }
+
+// Open folder location of a specific exe from the hwnd.
+static void ActionRevealExe(HWND hwnd)
+{
+    if (isClassName(hwnd, TEXT("Ghost"))) {
+        hwnd = HungWindowFromGhostWindowL(hwnd);
+        if (!hwnd) {
+            return;
+        }
+    }
+    TCHAR exe_path[MAX_PATH];
+    if (GetWindowProgNameFullPath(hwnd, exe_path, ARR_SZ(exe_path))) {
+        ShowFileLocationInExplorer(exe_path);
+    }
+}
+
 // Try harder to actually set the window foreground.
 static void ReallySetForegroundWindow(HWND hwnd)
 {
@@ -2729,26 +2761,18 @@ static void TogglesAlwaysOnTop(HWND hwnd);
 static HWND MDIorNOT(HWND hwnd, HWND *mdiclient_);
 ///////////////////////////////////////////////////////////////////////////
 // Keep this one minimalist, it is always on.
-// Time stamp of the last keyboard event we received, used by REHOOK_TIMER
-// to detect that Windows silently removed our keyboard hook.
-static DWORD g_kbLastTick, g_kbPrevCheck;
-#ifdef __cplusplus
-extern "C"
-#endif
-__declspec(dllexport) LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam)
+LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam)
 {
-#if defined(_MSC_VER) && _MSC_VER > 1300
-#pragma comment(linker, "/EXPORT:" __FUNCTION__ "=" __FUNCDNAME__)
-#endif
-
-    if (nCode != HC_ACTION || state.ignorekey) return CallNextHookEx(NULL, nCode, wParam, lParam);
-
     PKBDLLHOOKSTRUCT kbh = ((PKBDLLHOOKSTRUCT)lParam);
+
+    if (nCode != HC_ACTION) return CallNextHookEx(NULL, nCode, wParam, lParam);
+    //g_lastKeyboardTick = kbh->time;
+    if (state.ignorekey) return CallNextHookEx(NULL, nCode, wParam, lParam);
+
     unsigned char vkey = kbh->vkCode;
 //    DWORD scode = kbh->scanCode;
     int xxbtidx;
     HWND fhwnd = NULL;
-    g_kbLastTick = kbh->time; // We are alive.
 //    if (vkey!=VK_F5) { // show key codes
 //        LOGA("wp=%u, vKey=%lx, sCode=%lx, flgs=%lx, ex=%lx"
 //        , wParam, kbh->vkCode, kbh->scanCode, kbh->flags, kbh->dwExtraInfo);
@@ -4899,6 +4923,7 @@ static void SClickActions(HWND hwnd, action_t action)
     case AC_KILL:        ActionKill(hwnd); break;
     case AC_PAUSE:       ActionPause(hwnd, 1); break;
     case AC_RESUME:      ActionPause(hwnd, 0); break;
+    case AC_REVEALEXE:   ActionRevealExe(hwnd); break;
     case AC_ROLL:        RollWindow(hwnd, action.fl == ACFL_UP ? +120 : action.fl == ACFL_DOWN ? -120 : 0); break;
     case AC_MAXHV:       MaximizeHV(hwnd, state.shift); break;
     case AC_MINALL:      MinimizeAllOtherWindows(hwnd, state.shift); break;
@@ -5088,6 +5113,7 @@ static int init_movement_and_actions(POINT pt, HWND hwnd, action_t action, int b
     }
 
     //LOGA("Blacklists passed! in %d us", (int)RGTac(&tt));
+    //LOGA("Going to perform action %d on  %ls:%ls|%ls  maximized=%d", (int)action.ac, state.exename, state.title, state.classname, (int)state.origin.maximized);
 
     // If no action is to be done then we passed all balcklists
     if (probemode || action.ac == AC_NONE) return 1;
@@ -5717,36 +5743,18 @@ static VOID CALLBACK TimerWindowProc(HWND hwnd, UINT msg, UINT_PTR idEvent, DWOR
 
     //LOG("TimerWindowProc(%x, %u, %u, %lu)", (UINT)(UINT_PTR)hwnd, msg, idEvent, dwTime);
     switch (idEvent) {
+    #ifndef NO_HOOK_LL
     case REHOOK_TIMER: {
         // Silently rehook hooks if they have been stopped (>= Win7 and LowLevelHooksTimeout)
         // This can often happen if locking or sleeping the computer a lot
-        LASTINPUTINFO lii;
-        DWORD now;
-        #ifndef NO_HOOK_LL
-        if (conf.keepMousehook && mousehook) {
-            POINT pt;
-            GetCursorPos(&pt); // I donot know if we should really use the ASYN version.
-            if (!SamePt(state.prevpt, pt)) {
-                UnhookWindowsHookEx(mousehook);
-                mousehook = SetWindowsHookEx(WH_MOUSE_LL, LowLevelMouseProc, hinstDLL, 0);
-            }
-        }
-        #endif
-        // The keyboard hook (owned by the exe) is always on and can be lost
-        // the same way. Windows does not tell us, so we infer it: if the
-        // user produced input since our last check but the keyboard hook
-        // saw nothing since then, ask the exe to re-install it.
-        // Ages are compared with unsigned arithmetic, so wraparound is fine.
-        lii.cbSize = sizeof(lii);
-        if (GetLastInputInfo(&lii)) {
-            now = GetTickCount();
-            if (now - lii.dwTime < now - g_kbPrevCheck   // Input since last check
-            &&  now - lii.dwTime < now - g_kbLastTick) { // that the hook missed
-                PostMessage(g_mainhwnd, WM_REHOOKKB, 0, 0);
-            }
-            g_kbPrevCheck = now;
+        POINT pt;
+        GetCursorPos(&pt); // I donot know if we should really use the ASYN version.
+        if (mousehook && !SamePt(state.prevpt, pt)) {
+            UnhookWindowsHookEx(mousehook);
+            mousehook = SetWindowsHookEx(WH_MOUSE_LL, LowLevelMouseProc, hinstDLL, 0);
         }
         } break;
+    #endif
     case SPEED_TIMER: {
         static POINT oldpt;
         static int has_moved_to_fixed_pt;
@@ -6163,7 +6171,7 @@ LRESULT CALLBACK MenuWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
     return DefWindowProc(hwnd, msg, wParam, lParam);
 }
 
-LRESULT CALLBACK HotKeysWinProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+LRESULT CALLBACK HooksWinPorc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     if (msg == WM_HOTKEY) {
         int ptwindow = 0;
@@ -6239,7 +6247,18 @@ LRESULT CALLBACK HotKeysWinProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         RECT **dZones = (RECT**)lParam;
         if (dZones) *dZones = Zones[layout_idx].it;
         return (LRESULT)Zones[layout_idx].num; // Return number of zones on the layout
-    }
+    } /*else if (msg == WM_POWERBROADCAST) {
+        if (wParam == PBT_APMRESUMEAUTOMATIC && g_keyhook) {
+            LOG("Waking up from sleep mode: msg=WM_POWERBROADCAST, wParam=PBT_APMRESUMEAUTOMATIC");
+            Send_KEY(0xFF);
+            DWORD deltaT = GetTickCount() - g_lastKeyboardTick;
+            if (deltaT > 500) {
+                LOG("Keyboard HOOK lost: GetTickCount() - g_lastKeyboardTick = %u, rehooking...", (unsigned)deltaT);
+                UnhookWindowsHookEx(g_keyhook);
+                g_keyhook = SetWindowsHookEx(WH_KEYBOARD_LL, LowLevelKeyboardProc, hinstDLL, 0);
+            }
+        }
+    }*/
 
     return DefWindowProc(hwnd, msg, wParam, lParam);
 }
@@ -6265,6 +6284,15 @@ __declspec(dllexport) void WINAPI Unload(void)
 #if defined(_MSC_VER) && _MSC_VER > 1300
 #pragma comment(linker, "/EXPORT:" __FUNCTION__ "=" __FUNCDNAME__)
 #endif
+
+    // UnKook keyboard.
+    if (g_keyhook) {
+        BOOL ret = UnhookWindowsHookEx(g_keyhook);
+        LOG("UnhookWindowsHookEx(%x) -> %d", (unsigned)(LPARAM)g_keyhook, (int)ret);
+    }
+    g_keyhook = NULL;
+
+
     // Quit Worker Thread...
     PostThreadMessage(g_WorkerThreadID, WM_DOWORK, 0, 0);
 
@@ -6308,6 +6336,10 @@ __declspec(dllexport) void WINAPI Unload(void)
     // Wait for worker thread to have a clean closing...
     WaitForSingleObject(g_WorkerThreadHANDLE, 5000);
     CloseHandle(g_WorkerThreadHANDLE);
+
+    // Unregister from WM_POWERBROADCAST messages
+    //UnregisterSuspendResumeNotificationL(g_suspendResumeNotificationHANDLE);
+    //g_suspendResumeNotificationHANDLE = NULL;
 
     CHECK_MEMORY_LEAK_DB();
 }
@@ -6390,7 +6422,7 @@ static void readblacklist(const TCHAR *section, blacklist_t *blacklist, const ch
         blacklist->items = newitem;
 
         // Store item
-        LOG( "%ls:%ls|%ls", exenm, title, klass);
+        LOG( "%s:%s|%s", exenm, title, klass);
         blacklist->items[blacklist->length].exename = exenm;
         blacklist->items[blacklist->length].title = title;
         blacklist->items[blacklist->length].classname = klass;
@@ -6642,10 +6674,11 @@ __declspec(dllexport) WNDPROC WINAPI Load(HWND mainhwnd, const TCHAR *inipath)
 #if defined(_MSC_VER) && _MSC_VER > 1300
 #pragma comment(linker, "/EXPORT:" __FUNCTION__ "=" __FUNCDNAME__)
 #endif
+    assert(g_keyhook == NULL); // We cannot Load twice again...
+
     // Reset stuff...
     mem00(&state, sizeof(state));
     mem00(&LastWin, sizeof(LastWin));
-
     // GET SYSTEM SETTINGS
     // I am unable to get consistent SPI_GETMOUSEDRAGOUTTHRESHOLD results
     // value should be at 20 by default, but I cannot have a decent value
@@ -6806,16 +6839,23 @@ __declspec(dllexport) WNDPROC WINAPI Load(HWND mainhwnd, const TCHAR *inipath)
     // Hook mouse if a permanent hook is needed
     if (conf.keepMousehook) {
         HookMouse();
+        SetTimer(g_mainhwnd, REHOOK_TIMER, 5000, (TIMERPROC)TimerWindowProc); // Start rehook timer
     }
-    // Start rehook timer, the keyboard hook is installed by the exe right after Load.
-    g_kbLastTick = g_kbPrevCheck = GetTickCount();
-    SetTimer(g_mainhwnd, REHOOK_TIMER, 5000, (TIMERPROC)TimerWindowProc);
+
+    // Set up the keyboard hook
+    g_keyhook = SetWindowsHookEx(WH_KEYBOARD_LL, LowLevelKeyboardProc, hinstDLL, 0);
+    if (g_keyhook == NULL) {
+        LOG("ERROR: Keyboard HOOK could not be set");
+    }
+
+    // In order to get WM_POWERBROADCAST messages.
+    //g_suspendResumeNotificationHANDLE = RegisterSuspendResumeNotificationL((HANDLE)mainhwnd, DEVICE_NOTIFY_WINDOW_HANDLE);
 
     // Create worker thread.
     g_WorkerThreadHANDLE = CreateThread(NULL, STACK, WorkerThread, NULL, STACK_SIZE_PARAM_IS_A_RESERVATION, &g_WorkerThreadID);
     //SetThreadPriority(g_WorkerThreadHANDLE, THREAD_PRIORITY_BELOW_NORMAL);
 
-    return HotKeysWinProc;
+    return HooksWinPorc;
 }
 /////////////////////////////////////////////////////////////////////////////
 // Do not forget the -e_DllMain@12 for gcc... -eDllMain for x86_64
