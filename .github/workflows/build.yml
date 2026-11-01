@@ -14,8 +14,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: x86,    sys: MINGW32 }
-          - { name: x86_64, sys: MINGW64 }
+          - { name: x86,    sys: MINGW32, pe: pe-i386 }
+          - { name: x86_64, sys: MINGW64, pe: pe-x86-64 }
 
     defaults:
       run:
@@ -39,21 +39,29 @@ jobs:
       - name: Show toolchain version
         run: |
           gcc --version
+          gcc -dumpmachine
           windres --version
           make --version
+
+      - name: Patch Makefile for target architecture
+        run: |
+          echo "--- arch-related lines before patch ---"
+          grep -nE -- '-m32|-m64|i386|i686|x86-64|x86_64|pe-' Makefile || true
+
+          # Remove hardcoded -m32 / -m64 so the toolchain's native arch is used
+          sed -i -E 's/(^|[[:space:]])-m(32|64)([[:space:]]|$)/ /g' Makefile
+
+          # Fix windres output target if hardcoded
+          sed -i -E 's/pe-i386|pe-x86-64/${{ matrix.pe }}/g' Makefile
+
+          echo "--- arch-related lines after patch ---"
+          grep -nE -- '-m32|-m64|i386|i686|x86-64|x86_64|pe-' Makefile || true
 
       - name: Build
         run: |
           set -e
-          ls -la
-          if [ -f Makefile ] || [ -f makefile ] || [ -f GNUmakefile ]; then
-            make
-          elif [ -f build.bat ]; then
-            cmd //c build.bat
-          else
-            echo "No Makefile or build.bat found"
-            exit 1
-          fi
+          make clean || true
+          make
 
       - name: Collect output
         run: |
