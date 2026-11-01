@@ -14,8 +14,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: x86,    sys: MINGW32, pe: pe-i386 }
-          - { name: x86_64, sys: MINGW64, pe: pe-x86-64 }
+          - { name: x86,    sys: MINGW32 }
+          - { name: x86_64, sys: MINGW64 }
 
     defaults:
       run:
@@ -30,47 +30,35 @@ jobs:
         with:
           msystem: ${{ matrix.sys }}
           update: true
-          install: >-
-            make
-            zip
-          pacboy: >-
-            toolchain:p
+          install: make
+          pacboy: toolchain:p
 
       - name: Show toolchain version
         run: |
           gcc --version
-          gcc -dumpmachine
           windres --version
           make --version
 
-      - name: Patch Makefile for target architecture
-        run: |
-          echo "--- arch-related lines before patch ---"
-          grep -nE -- '-m32|-m64|i386|i686|x86-64|x86_64|pe-' Makefile || true
-
-          # Remove hardcoded -m32 / -m64 so the toolchain's native arch is used
-          sed -i -E 's/(^|[[:space:]])-m(32|64)([[:space:]]|$)/ /g' Makefile
-
-          # Fix windres output target if hardcoded
-          sed -i -E 's/pe-i386|pe-x86-64/${{ matrix.pe }}/g' Makefile
-
-          echo "--- arch-related lines after patch ---"
-          grep -nE -- '-m32|-m64|i386|i686|x86-64|x86_64|pe-' Makefile || true
-
       - name: Build
         run: |
-          set -e
-          make clean || true
-          make
+          if [ "${{ matrix.name }}" = "x86_64" ]; then
+            if [ -f MakefileX64 ]; then
+              make -f MakefileX64 CC=gcc WINDRES=windres
+            else
+              # Fallback if MakefileX64 is missing: patch 32-bit flags to 64-bit
+              sed -i 's/-m32/-m64/g; s/pe-i386/pe-x86-64/g' Makefile
+              make -f Makefile CC=gcc WINDRES=windres
+            fi
+          else
+            make -f Makefile CC=gcc WINDRES=windres
+          fi
 
       - name: Collect output
         run: |
           mkdir -p dist
-          find . -maxdepth 3 -type f \( -iname '*.exe' -o -iname '*.dll' \) \
-            -not -path './dist/*' -not -path './.git/*' \
-            -exec cp -v {} dist/ \;
-          for f in AltSnap.ini Lang languages; do
-            if [ -e "$f" ]; then cp -rv "$f" dist/; fi
+          find . -maxdepth 2 \( -name '*.exe' -o -name '*.dll' \) -not -path './dist/*' -exec cp -v {} dist/ \;
+          for f in AltSnap.ini License.txt Readme.txt Lang languages; do
+            [ -e "$f" ] && cp -rv "$f" dist/ || true
           done
           ls -la dist
 
@@ -88,17 +76,15 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
         with:
           path: artifacts
 
       - name: Zip artifacts
         run: |
           cd artifacts
-          for d in */; do
-            (cd "$d" && zip -r "../${d%/}.zip" .)
-          done
-          ls -la
+          for d in */; do zip -r "${d%/}.zip" "$d"; done
 
       - name: Create release
         uses: softprops/action-gh-release@v2
