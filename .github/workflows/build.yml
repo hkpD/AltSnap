@@ -41,11 +41,13 @@ jobs:
 
       - name: Build
         run: |
+          # Ensure -lshell32 is linked for all targets (needed by ShellExecuteA in hooks.c)
+          sed -i 's/-lgdi32/-lgdi32 -lshell32/g' Makefile*
+
           if [ "${{ matrix.name }}" = "x86_64" ]; then
             if [ -f MakefileX64 ]; then
               make -f MakefileX64 CC=gcc WINDRES=windres
             else
-              # Fallback if MakefileX64 is missing: patch 32-bit flags to 64-bit
               sed -i 's/-m32/-m64/g; s/pe-i386/pe-x86-64/g' Makefile
               make -f Makefile CC=gcc WINDRES=windres
             fi
