@@ -30,9 +30,9 @@ jobs:
         with:
           msystem: ${{ matrix.sys }}
           update: true
-          pacman-mirror: https://mirror.msys2.org
           install: >-
             make
+            zip
           pacboy: >-
             toolchain:p
 
@@ -44,20 +44,25 @@ jobs:
 
       - name: Build
         run: |
-          if [ -f Makefile ] || [ -f makefile ]; then
+          set -e
+          ls -la
+          if [ -f Makefile ] || [ -f makefile ] || [ -f GNUmakefile ]; then
             make
           elif [ -f build.bat ]; then
             cmd //c build.bat
           else
-            echo "No Makefile or build.bat found" && exit 1
+            echo "No Makefile or build.bat found"
+            exit 1
           fi
 
       - name: Collect output
         run: |
           mkdir -p dist
-          find . -maxdepth 2 \( -name '*.exe' -o -name '*.dll' \) -not -path './dist/*' -exec cp -v {} dist/ \;
+          find . -maxdepth 3 -type f \( -iname '*.exe' -o -iname '*.dll' \) \
+            -not -path './dist/*' -not -path './.git/*' \
+            -exec cp -v {} dist/ \;
           for f in AltSnap.ini Lang languages; do
-            [ -e "$f" ] && cp -rv "$f" dist/ || true
+            if [ -e "$f" ]; then cp -rv "$f" dist/; fi
           done
           ls -la dist
 
@@ -82,7 +87,10 @@ jobs:
       - name: Zip artifacts
         run: |
           cd artifacts
-          for d in */; do zip -r "${d%/}.zip" "$d"; done
+          for d in */; do
+            (cd "$d" && zip -r "../${d%/}.zip" .)
+          done
+          ls -la
 
       - name: Create release
         uses: softprops/action-gh-release@v2
