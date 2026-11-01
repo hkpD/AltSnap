@@ -1,52 +1,41 @@
 name: Build AltSnap
 
-# Controls when the workflow will run
 on:
-  # Allows you to run this workflow manually from the Actions tab
-  workflow_dispatch:
-  # Also runs automatically whenever you push code to the main/master branch
   push:
-    branches: [ "main", "master" ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   build:
     runs-on: windows-latest
 
     steps:
-      # 1. Download your repository code into the runner
-      - name: Checkout repository
+      - name: Check out source
         uses: actions/checkout@v4
 
-      # 2. Setup GCC + MinGW-w64 (WinLibs)
-      # GitHub's Windows runner comes with MinGW, but Strawberry Perl often conflicts with it.
-      # This step removes Perl from the PATH and ensures the latest WinLibs MinGW is used.
-      - name: Setup MinGW-w64 (WinLibs)
-        shell: pwsh
-        run: |
-          choco upgrade mingw -y
-          # Put MinGW at the very front of the system PATH to avoid conflicts
-          echo "C:\ProgramData\mingw64\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Install MinGW-w64 GCC
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-gcc
+            make
 
-      # 3. Verify the compiler is working
-      - name: Verify GCC version
+      - name: Build AltSnap
+        shell: msys2 {0}
         run: |
           gcc --version
-          mingw32-make --version
+          make
 
-      # 4. Build AltSnap using the Makefile
-      - name: Build AltSnap
-        run: mingw32-make -j4
-
-      # 5. Package the built files so you can download them
-      - name: Upload Built Artifact
+      - name: Upload build output
         uses: actions/upload-artifact@v4
         with:
-          name: AltSnap-Build-x64
+          name: AltSnap-windows-x64
           path: |
-            *.exe
-            *.dll
-            *.ini
-            *.txt
-            *.manifest
-            Lang/
+            **/*.exe
+            **/*.dll
           if-no-files-found: error
