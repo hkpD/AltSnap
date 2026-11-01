@@ -2,40 +2,89 @@ name: Build AltSnap
 
 on:
   push:
+    branches: [ master, main ]
+    tags: [ 'v*' ]
   pull_request:
   workflow_dispatch:
-
-permissions:
-  contents: read
 
 jobs:
   build:
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: x86,    sys: MINGW32 }
+          - { name: x86_64, sys: MINGW64 }
+
+    defaults:
+      run:
+        shell: msys2 {0}
 
     steps:
-      - name: Check out source
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install MinGW-w64 GCC
+      - name: Set up MSYS2 / MinGW-w64 (${{ matrix.name }})
         uses: msys2/setup-msys2@v2
         with:
-          msystem: MINGW64
+          msystem: ${{ matrix.sys }}
           update: true
+          pacman-mirror: https://mirror.msys2.org
           install: >-
-            mingw-w64-x86_64-gcc
             make
+          pacboy: >-
+            toolchain:p
 
-      - name: Build AltSnap
-        shell: msys2 {0}
+      - name: Show toolchain version
         run: |
           gcc --version
-          make
+          windres --version
+          make --version
 
-      - name: Upload build output
+      - name: Build
+        run: |
+          if [ -f Makefile ] || [ -f makefile ]; then
+            make
+          elif [ -f build.bat ]; then
+            cmd //c build.bat
+          else
+            echo "No Makefile or build.bat found" && exit 1
+          fi
+
+      - name: Collect output
+        run: |
+          mkdir -p dist
+          find . -maxdepth 2 \( -name '*.exe' -o -name '*.dll' \) -not -path './dist/*' -exec cp -v {} dist/ \;
+          for f in AltSnap.ini Lang languages; do
+            [ -e "$f" ] && cp -rv "$f" dist/ || true
+          done
+          ls -la dist
+
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: AltSnap-windows-x64
-          path: |
-            **/*.exe
-            **/*.dll
+          name: AltSnap-${{ matrix.name }}
+          path: dist/
           if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Zip artifacts
+        run: |
+          cd artifacts
+          for d in */; do zip -r "${d%/}.zip" "$d"; done
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.zip
