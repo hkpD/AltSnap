@@ -1,60 +1,52 @@
 name: Build AltSnap
 
+# Controls when the workflow will run
 on:
-  push:
-    branches: [main, master]
-  pull_request:
+  # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
+  # Also runs automatically whenever you push code to the main/master branch
+  push:
+    branches: [ "main", "master" ]
 
 jobs:
   build:
     runs-on: windows-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: x86
-            msystem: MINGW32
-            makefile: Makefile
-            artifact: altsnap-x86
-          - name: x64
-            msystem: MINGW64
-            makefile: MakefileX64
-            artifact: altsnap-x64
-
-    defaults:
-      run:
-        shell: msys2 {0}
 
     steps:
-      - uses: actions/checkout@v4
+      # 1. Download your repository code into the runner
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - uses: msys2/setup-msys2@v2
-        with:
-          msystem: ${{ matrix.msystem }}
-          update: true
-          install: >-
-            make
-            mingw-w64-${{ matrix.msystem == 'MINGW32' && 'i686' || 'x86_64' }}-gcc
-            mingw-w64-${{ matrix.msystem == 'MINGW32' && 'i686' || 'x86_64' }}-binutils
-
-      - name: Build
-        run: make -f ${{ matrix.makefile }}
-
-      - name: Prepare portable package
+      # 2. Setup GCC + MinGW-w64 (WinLibs)
+      # GitHub's Windows runner comes with MinGW, but Strawberry Perl often conflicts with it.
+      # This step removes Perl from the PATH and ensures the latest WinLibs MinGW is used.
+      - name: Setup MinGW-w64 (WinLibs)
         shell: pwsh
         run: |
-          $dir = "dist/${{ matrix.artifact }}"
-          New-Item -ItemType Directory -Force -Path $dir, "$dir/Lang" | Out-Null
-          Copy-Item AltSnap.exe, hooks.dll, AltSnap.txt, AltSnap.xml, License.txt $dir
-          Copy-Item AltSnap.dni "$dir/AltSnap.ini"
-          if (Test-Path Lang) { Copy-Item Lang\* "$dir/Lang\" -Recurse -ErrorAction SilentlyContinue }
-          # optional extras often shipped
-          if (Test-Path sch_On.bat) { Copy-Item sch_On.bat, sch_Off.bat $dir -ErrorAction SilentlyContinue }
-          if (Test-Path Themes) { Copy-Item Themes $dir -Recurse -ErrorAction SilentlyContinue }
+          choco upgrade mingw -y
+          # Put MinGW at the very front of the system PATH to avoid conflicts
+          echo "C:\ProgramData\mingw64\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-      - uses: actions/upload-artifact@v4
+      # 3. Verify the compiler is working
+      - name: Verify GCC version
+        run: |
+          gcc --version
+          mingw32-make --version
+
+      # 4. Build AltSnap using the Makefile
+      - name: Build AltSnap
+        run: mingw32-make -j4
+
+      # 5. Package the built files so you can download them
+      - name: Upload Built Artifact
+        uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
-          path: dist/${{ matrix.artifact }}/
+          name: AltSnap-Build-x64
+          path: |
+            *.exe
+            *.dll
+            *.ini
+            *.txt
+            *.manifest
+            Lang/
           if-no-files-found: error
